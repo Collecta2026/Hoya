@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Fleet{% endblock %}
+{% block body %}
+<h1>Drivers & vehicles</h1>
+<div class="split">
+  <div class="card">
+    <h2>Drivers</h2>
+    <table><thead><tr><th>Name</th><th>Phone</th><th>Licence</th><th>Login</th></tr></thead><tbody>
+    {% for d in drivers %}<tr><td>{{ d.user.name if d.user else '—' }}</td><td>{{ d.phone or '' }}</td>
+    <td class="mono">{{ d.licence_no or '' }}</td><td class="small muted">{{ d.user.email if d.user else '' }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No drivers.</td></tr>{% endfor %}</tbody></table>
+    <h2 style="margin-top:1.2rem">Add driver</h2>
+    <form method="post" action="{{ url_for('add_driver') }}">
+      <div class="grid2"><div><label>Name</label><input name="name" required></div>
+      <div><label>Phone</label><input name="phone"></div></div>
+      <div class="grid2"><div><label>Email (login)</label><input name="email" type="email" required></div>
+      <div><label>Licence no.</label><input name="licence_no"></div></div>
+      <label>Password</label><input name="password" placeholder="driver123">
+      <button class="btn ghost block" style="margin-top:.7rem">Add driver</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Vehicles</h2>
+    <table><thead><tr><th>Reg</th><th>Type</th><th>Model</th><th>Pallets</th></tr></thead><tbody>
+    {% for v in vehicles %}<tr><td class="mono">{{ v.reg }}</td><td>{{ v.vtype }}</td>
+    <td>{{ v.make_model or '' }}</td><td>{{ v.capacity_pallets }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No vehicles.</td></tr>{% endfor %}</tbody></table>
+    <h2 style="margin-top:1.2rem">Add vehicle</h2>
+    <form method="post" action="{{ url_for('add_vehicle') }}">
+      <div class="grid2"><div><label>Reg</label><input name="reg" required></div>
+      <div><label>Type</label><select name="vtype"><option>van</option><option>luton</option><option>7.5t</option><option>18t</option><option>car</option></select></div></div>
+      <div class="grid2"><div><label>Make / model</label><input name="make_model"></div>
+      <div><label>Pallet capacity</label><input name="capacity_pallets" type="number" value="0"></div></div>
+      <button class="btn ghost block" style="margin-top:.7rem">Add vehicle</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

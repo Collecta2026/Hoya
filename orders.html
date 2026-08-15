@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Orders{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Orders</h1><a class="btn" href="{{ url_for('order_new') }}">+ New order</a>
+</div>
+<div class="card">
+  <div class="actions" style="margin-bottom:.8rem">
+    <a class="btn sm ghost" href="{{ url_for('orders') }}">All</a>
+    <a class="btn sm ghost" href="{{ url_for('orders', status='unassigned') }}">Unassigned</a>
+    <a class="btn sm ghost" href="{{ url_for('orders', status='out') }}">Out</a>
+    <a class="btn sm ghost" href="{{ url_for('orders', status='delivered') }}">Delivered</a>
+    <a class="btn sm ghost" href="{{ url_for('orders', status='failed') }}">Failed</a>
+  </div>
+  <table>
+    <thead><tr><th>Ref</th><th>Customer</th><th>Recipient</th><th>Postcode</th><th>Service</th><th>Plt</th><th>Price</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for o in orders %}
+      <tr>
+        <td class="mono">{{ o.ref }}</td><td>{{ o.customer.name }}</td>
+        <td>{{ o.recipient }}</td><td class="mono">{{ o.postcode }}</td>
+        <td>{{ o.service }}</td><td>{{ o.pallets }}</td>
+        <td>£{{ '%.2f'|format(o.price) }}</td>
+        <td><span class="pill {{ o.status }}">{{ o.status }}</span></td>
+      </tr>
+    {% else %}<tr><td colspan="8" class="muted">No orders.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

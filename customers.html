@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Customers{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Customers & rates</h1><a class="btn" href="{{ url_for('customer_edit') }}">+ New customer</a>
+</div>
+<div class="card">
+<table>
+  <thead><tr><th>Customer</th><th>Contact</th><th>Base £/drop</th><th>£/mile</th><th>£/pallet</th><th>Portal code</th><th></th></tr></thead>
+  <tbody>
+  {% for c in customers %}
+    <tr><td><b>{{ c.name }}</b><br><span class="small muted">{{ c.postcode }}</span></td>
+    <td>{{ c.contact_name or '—' }}<br><span class="small muted">{{ c.phone or '' }}</span></td>
+    <td>£{{ '%.2f'|format(c.rate_base) }}</td><td>£{{ '%.2f'|format(c.rate_per_mile) }}</td>
+    <td>£{{ '%.2f'|format(c.rate_per_pallet) }}</td><td class="mono">{{ c.portal_code }}</td>
+    <td><a class="btn sm ghost" href="{{ url_for('customer_edit', cid=c.id) }}">Edit</a></td></tr>
+  {% else %}<tr><td colspan="7" class="muted">No customers.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

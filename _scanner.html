@@ -1,0 +1,42 @@
+{# Shared barcode scanner block. Requires JS vars SCAN_TYPE, STOP_ID or ROUTE_ID. #}
+<div id="scanbox" class="card" style="display:none">
+  <div id="reader" style="width:100%"></div>
+  <button type="button" class="btn ghost block sm" onclick="stopScan()">Stop camera</button>
+</div>
+<div class="inline" style="margin:.6rem 0">
+  <div style="flex:1"><label style="margin-top:0">Manual barcode</label>
+    <input id="manualbc" placeholder="type or paste a barcode"></div>
+  <button type="button" class="btn ghost" onclick="manualScan()">Add</button>
+</div>
+<button type="button" class="btn teal block" onclick="startScan()">📷 Scan with camera</button>
+<div id="scanmsg" class="small" style="margin-top:.6rem"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+let html5qr=null, gps=null;
+if(navigator.geolocation){navigator.geolocation.getCurrentPosition(p=>{gps=p.coords.latitude.toFixed(5)+','+p.coords.longitude.toFixed(5);},()=>{},{timeout:5000});}
+function payload(bc){const d={barcode:bc,scan_type:SCAN_TYPE,gps:gps};
+  if(typeof STOP_ID!=='undefined')d.stop_id=STOP_ID;
+  if(typeof ROUTE_ID!=='undefined')d.route_id=ROUTE_ID;return d;}
+async function postScan(bc){
+  const r=await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload(bc))});
+  const d=await r.json(); applyResult(d);
+}
+function applyResult(d){
+  const msg=document.getElementById('scanmsg');
+  const el=document.querySelector('[data-bc="'+CSS.escape(d.barcode)+'"]');
+  const label={matched:'✓ scanned',duplicate:'already scanned',unknown:'⚠ not on this job',added:'✓ added (collection)'}[d.result]||d.result;
+  if(el){el.classList.add('delivered'); el.querySelector('.pill').textContent = SCAN_TYPE==='load'?'loaded':(SCAN_TYPE==='collect'?'collected':'delivered'); el.querySelector('.pill').className='pill delivered';}
+  msg.innerHTML='<b>'+d.barcode+'</b> — '+label+'  ·  '+d.done+'/'+d.total+' done';
+  msg.style.color = d.result==='unknown'?'#c8452f':'#12723f';
+  const prog=document.getElementById('progress'); if(prog){prog.textContent=d.done+'/'+d.total;}
+}
+function manualScan(){const v=document.getElementById('manualbc').value.trim(); if(v){postScan(v); document.getElementById('manualbc').value='';}}
+function startScan(){
+  document.getElementById('scanbox').style.display='block';
+  html5qr=new Html5Qrcode("reader");
+  html5qr.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:150}},
+    (txt)=>{postScan(txt);}, ()=>{}).catch(e=>{document.getElementById('scanmsg').textContent='Camera unavailable — use manual entry. '+e;});
+}
+function stopScan(){if(html5qr){html5qr.stop().then(()=>{html5qr.clear();document.getElementById('scanbox').style.display='none';});}}
+</script>

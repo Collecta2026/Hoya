@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Scan{% endblock %}
+{% block body %}
+<div class="phone">
+  <p class="small"><a href="{{ url_for('driver_stop', sid=s.id) }}">← Stop</a></p>
+  <h1>{{ 'Collect' if mode=='collect' else 'Deliver' }} items
+    <span class="muted" id="progress" style="font-size:1rem">
+      {{ s.order.scanned_count }}/{{ items|length }}</span></h1>
+  <p class="muted small">{{ s.order.recipient or s.order.customer.name }} · {{ s.order.postcode }}</p>
+  {% include "_scanlist.html" %}
+  <script>const SCAN_TYPE='{{ mode }}'; const STOP_ID={{ s.id }};</script>
+  {% include "_scanner.html" %}
+  <a class="btn block" style="margin-top:1rem" href="{{ url_for('driver_stop', sid=s.id) }}">Done — back to stop</a>
+</div>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Messages{% endblock %}
+{% block body %}
+<h1>Customer messages</h1>
+<div class="card">
+<p class="small muted">SMS log. When Twilio credentials are set on the server these send as real texts;
+otherwise they're recorded here so you can see exactly what would go out.</p>
+<table><thead><tr><th>Time</th><th>To</th><th>Order</th><th>Message</th><th>Status</th></tr></thead><tbody>
+{% for l in logs %}
+  <tr><td class="small">{{ l.created_at.strftime('%d %b %H:%M') }}</td><td class="mono">{{ l.to }}</td>
+  <td class="mono">{{ l.order_ref or '' }}</td><td class="small">{{ l.body }}</td>
+  <td><span class="pill {{ 'delivered' if l.status in ['sent','logged'] else 'failed' }}">{{ l.status }}</span></td></tr>
+{% else %}<tr><td colspan="5" class="muted">No messages yet.</td></tr>{% endfor %}
+</tbody></table>
+</div>
+{% endblock %}

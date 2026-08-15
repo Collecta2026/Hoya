@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% set hide_nav = true %}
+{% block title %}Track {{ o.ref }}{% endblock %}
+{% block body %}
+<div class="wrap narrow">
+<div class="card" style="text-align:center">
+  <div class="brand" style="justify-content:center;color:var(--ink)">Vo<span style="color:var(--orange)">ya</span></div>
+  <h1 style="margin-top:1rem">{{ o.ref }}</h1>
+  <p><span class="pill {{ o.status }}" style="font-size:.9rem">{{ o.status }}</span></p>
+  <p class="muted">Delivery to {{ o.recipient }}<br>{{ o.address }}, {{ o.postcode }}</p>
+  {% if o.stop and o.stop.pod and o.stop.pod.photo %}
+    <p class="small muted">Delivered {{ o.stop.completed_at.strftime('%d %b %H:%M') }}</p>
+    <img class="podimg" src="{{ url_for('pod_photo', pid=o.stop.pod.id) }}">
+  {% endif %}
+</div>
+</div>
+{% endblock %}

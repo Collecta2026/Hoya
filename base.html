@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}Voya{% endblock %}</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1b2430">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if user and not hide_nav %}
+<div class="topbar">
+  <a class="brand" href="/"><span class="dot"></span>Vo<span>ya</span></a>
+  {% if user.role in ['admin','dispatcher'] %}
+  <nav class="nav">
+    <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint=='dashboard' }}">Control board</a>
+    <a href="{{ url_for('orders') }}" class="{{ 'active' if request.endpoint=='orders' }}">Orders</a>
+    <a href="{{ url_for('routes_list') }}" class="{{ 'active' if 'route' in (request.endpoint or '') }}">Routes</a>
+    <a href="{{ url_for('customers') }}" class="{{ 'active' if 'customer' in (request.endpoint or '') }}">Customers</a>
+    <a href="{{ url_for('fleet') }}" class="{{ 'active' if request.endpoint=='fleet' }}">Fleet</a>
+    <a href="{{ url_for('reports') }}" class="{{ 'active' if request.endpoint=='reports' }}">Reports</a>
+    <a href="{{ url_for('messages') }}" class="{{ 'active' if request.endpoint=='messages' }}">Messages</a>
+  </nav>
+  {% else %}
+  <nav class="nav"><a href="{{ url_for('driver_home') }}" class="active">My routes</a></nav>
+  {% endif %}
+  <div class="who">{{ user.name }} · {{ user.role }} · <a href="{{ url_for('logout') }}">Sign out</a></div>
+</div>
+{% endif %}
+
+<div class="wrap {{ wrap_class or '' }}">
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</div>
+<script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

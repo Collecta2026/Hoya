@@ -1,0 +1,10 @@
+<div class="card">
+  {% for i in items %}
+  <div class="stopline {{ 'delivered' if i.status in ['delivered','collected','loaded'] }}" data-bc="{{ i.barcode }}">
+    <div class="stopmeta"><b>{{ i.kind|capitalize }}</b>
+      <span class="small muted mono">{{ i.barcode }}</span></div>
+    <span class="pill {{ 'delivered' if i.status in ['delivered','collected','loaded'] else 'pending' }}">
+      {{ i.status if i.status in ['delivered','collected','loaded'] else 'pending' }}</span>
+  </div>
+  {% else %}<p class="muted small">No items listed. Scan to add (collections).</p>{% endfor %}
+</div>

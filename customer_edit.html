@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% set wrap_class='narrow' %}
+{% block title %}{{ 'Edit' if c else 'New' }} customer{% endblock %}
+{% block body %}
+<h1>{{ 'Edit customer' if c else 'New customer' }}</h1>
+<div class="card">
+<form method="post">
+  <label>Company name</label><input name="name" value="{{ c.name if c else '' }}" required>
+  <div class="grid2">
+    <div><label>Contact name</label><input name="contact_name" value="{{ c.contact_name if c else '' }}"></div>
+    <div><label>Phone</label><input name="phone" value="{{ c.phone if c else '' }}"></div>
+  </div>
+  <label>Email</label><input name="email" value="{{ c.email if c else '' }}">
+  <div class="grid2">
+    <div><label>Address</label><input name="address" value="{{ c.address if c else '' }}"></div>
+    <div><label>Postcode</label><input name="postcode" value="{{ c.postcode if c else '' }}"></div>
+  </div>
+  <h2 style="margin-top:1.2rem">Rate profile</h2>
+  <p class="small muted">Each order is priced as base + (£/mile × depot→drop distance) + (£/pallet × pallets).</p>
+  <div class="grid2">
+    <div><label>Base £ per drop</label><input name="rate_base" type="number" step="0.01" value="{{ c.rate_base if c else 0 }}"></div>
+    <div><label>£ per mile</label><input name="rate_per_mile" type="number" step="0.01" value="{{ c.rate_per_mile if c else 0 }}"></div>
+  </div>
+  <label>£ per pallet</label><input name="rate_per_pallet" type="number" step="0.01" value="{{ c.rate_per_pallet if c else 0 }}">
+  {% if c %}<p class="small muted" style="margin-top:.8rem">Portal access code: <b class="mono">{{ c.portal_code }}</b></p>{% endif %}
+  <button class="btn block big" style="margin-top:.8rem">Save customer</button>
+</form>
+</div>
+{% endblock %}

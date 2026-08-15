@@ -1,0 +1,59 @@
+# One-click Render deployment: a web service + a managed Postgres database.
+# Push this repo to GitHub, then in Render choose "New +" -> "Blueprint" and
+# point it at the repo. Render reads this file and provisions everything.
+services:
+  - type: web
+    name: voya
+    runtime: python
+    plan: starter          # paid tier = no sleeping, faster, always-on (recommended for live)
+    region: frankfurt      # EU region — lowest latency from the UK
+    healthCheckPath: /healthz
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 3 --timeout 60
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SEED_DEMO
+        value: "false"     # clean go-live: no sample data
+      - key: ADMIN_EMAIL
+        sync: false        # set your real admin email in the dashboard
+      - key: ADMIN_PASSWORD
+        sync: false        # set a strong admin password in the dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: voya-db
+          property: connectionString
+      # Set these three in the Render dashboard to switch SMS from log-only to live:
+      - key: TWILIO_SID
+        sync: false
+      - key: TWILIO_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
+
+  # Backup every 6 hours. Frequent snapshots of the whole database. Set BACKUP_BUCKET (+ endpoint & keys) for
+  # durable offsite copies; without them it writes to the service disk.
+  - type: cron
+    name: voya-backup
+    runtime: python
+    schedule: "0 */6 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python backup.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: voya-db
+          property: connectionString
+      - key: BACKUP_BUCKET
+        sync: false
+      - key: BACKUP_ENDPOINT
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+
+databases:
+  - name: voya-db
+    plan: basic-256mb      # paid = daily backups + point-in-time recovery
+    region: frankfurt

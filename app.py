@@ -18,15 +18,38 @@ from functools import wraps
 
 from flask import (Flask, render_template, request, redirect, url_for,
                    session, flash, abort, send_file, jsonify)
+from jinja2 import ChoiceLoader, FileSystemLoader
 
 from models import (db, User, Driver, Vehicle, Customer, Route, Order,
                     Stop, POD, SmsLog, Item, Scan)
 from optimise import optimise_sequence, geocode, haversine, DEPOT_DEFAULT
 from sms import send_sms
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSET_EXT = (".css", ".js", ".json", ".svg", ".png", ".ico",
+             ".webmanifest", ".jpg", ".jpeg", ".gif", ".txt")
+
+
+def find_asset(filename):
+    """Locate a static asset in static/ or (if uploads got flattened) the
+    repo root. Extension-whitelisted so source files are never served."""
+    if not filename.lower().endswith(ASSET_EXT):
+        return None
+    for base in (os.path.join(BASE_DIR, "static"), BASE_DIR):
+        full = os.path.normpath(os.path.join(base, filename))
+        if full.startswith(BASE_DIR) and os.path.isfile(full):
+            return full
+    return None
+
 
 def create_app():
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder=None)
+    # Resolve templates from templates/ first, then the repo root. This keeps
+    # the app working even if a GitHub folder upload flattened the files.
+    app.jinja_loader = ChoiceLoader([
+        FileSystemLoader(os.path.join(BASE_DIR, "templates")),
+        FileSystemLoader(BASE_DIR),
+    ])
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
 
     db_url = os.environ.get("DATABASE_URL", "sqlite:///helioops.db")
@@ -726,13 +749,24 @@ def register_routes(app):
         except Exception:
             return {"status": "degraded"}, 503
 
+    @app.route("/static/<path:filename>", endpoint="static")
+    def static_files(filename):
+        p = find_asset(filename)
+        if not p:
+            abort(404)
+        return send_file(p)
+
     @app.route("/manifest.webmanifest")
     def manifest():
-        return app.send_static_file("manifest.json")
+        p = find_asset("manifest.json")
+        return send_file(p) if p else ("", 404)
 
     @app.route("/sw.js")
     def service_worker():
-        resp = app.make_response(app.send_static_file("sw.js"))
+        p = find_asset("sw.js")
+        if not p:
+            return ("", 404)
+        resp = app.make_response(send_file(p))
         resp.headers["Content-Type"] = "application/javascript"
         return resp
 

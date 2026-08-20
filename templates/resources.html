@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Resources{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Resources — vans &amp; drivers</h1>
+  <a class="btn ghost sm" href="{{ url_for('pending_board') }}">Pending board</a>
+</div>
+<div class="split">
+  <div class="card">
+    <h2>Vans</h2>
+    <table>
+      <thead><tr><th>Reg</th><th>Size</th><th>Pallets</th><th>Status</th><th>Set</th></tr></thead>
+      <tbody>
+      {% for v in vehicles %}
+      <tr>
+        <td class="mono">{{ v.reg }}</td><td>{{ v.vtype }}</td><td>{{ v.capacity_pallets }}</td>
+        <td><span class="res-dot res-{{ v.status }}"></span>{{ v.status.replace('_',' ') }}</td>
+        <td>
+          <form method="post" action="{{ url_for('vehicle_status', vid=v.id) }}" class="mini">
+            <select name="status" onchange="this.form.submit()">
+              <option value="available" {{ 'selected' if v.status=='available' }}>available</option>
+              <option value="on_route" {{ 'selected' if v.status=='on_route' }}>on route</option>
+              <option value="off_road" {{ 'selected' if v.status=='off_road' }}>off-road</option>
+            </select>
+          </form>
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="5" class="muted">No vans. Add them under Fleet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted" style="margin-top:.6rem">Only <b>available</b> vans are offered by "Suggest" on the board.</p>
+  </div>
+  <div class="card">
+    <h2>Drivers</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Status</th><th>Allocated now</th><th>Set</th></tr></thead>
+      <tbody>
+      {% for d in drivers %}
+      <tr>
+        <td>{{ d.user.name if d.user else '—' }}</td>
+        <td><span class="res-dot res-{{ d.status }}"></span>{{ d.status }}</td>
+        <td class="small">{{ alloc[d.id]|length }} job(s)
+          {% if alloc[d.id] %}<br><span class="muted">{{ alloc[d.id]|map(attribute='ref')|join(', ') }}</span>{% endif %}</td>
+        <td>
+          <form method="post" action="{{ url_for('driver_status', did=d.id) }}" class="mini">
+            <select name="status" onchange="this.form.submit()">
+              <option value="available" {{ 'selected' if d.status=='available' }}>available</option>
+              <option value="on_route" {{ 'selected' if d.status=='on_route' }}>on route</option>
+              <option value="off" {{ 'selected' if d.status=='off' }}>off</option>
+            </select>
+          </form>
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="4" class="muted">No drivers. Add them under Fleet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted" style="margin-top:.6rem">Mark a driver <b>off</b> and they drop out of allocation dropdowns.</p>
+  </div>
+</div>
+{% endblock %}

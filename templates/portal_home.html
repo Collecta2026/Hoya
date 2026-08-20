@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set hide_nav = true %}
+{% block title %}{{ c.name }}{% endblock %}
+{% block body %}
+<div class="topbar"><a class="brand" href="#"><span class="dot"></span>Vo<span>ya</span></a>
+  <nav class="nav">
+    <a class="navtop active" href="{{ url_for('portal_home') }}">New order</a>
+    <a class="navtop" href="{{ url_for('portal_track') }}">Track shipments</a>
+    <a class="navtop" href="{{ url_for('portal_invoices') }}">Invoices</a>
+  </nav>
+  <div class="who">{{ c.name }} &middot; <a href="{{ url_for('portal_logout') }}">Sign out</a></div></div>
+<div class="split" style="margin-top:1rem">
+  <div class="card">
+    <h2>Place a delivery or pickup order</h2>
+    <form method="post">
+      <label>Job type</label>
+      <select name="job_type"><option value="delivery">Delivery</option><option value="collection">Collection</option></select>
+      <div class="grid2">
+        <div><label>Contact name</label><input name="recipient" required></div>
+        <div><label>Contact phone</label><input name="phone" placeholder="07..."></div>
+      </div>
+      <label>Address</label><input name="address" required>
+      <div class="grid2">
+        <div><label>Postcode</label><input name="postcode" required></div>
+        <div><label>Service</label><select name="service"><option>next-day</option><option>same-day</option><option value="am">AM window</option><option value="pm">PM window</option></select></div>
+      </div>
+      <div class="grid2">
+        <div><label>Parcels</label><input name="parcels" type="number" value="0" min="0"></div>
+        <div><label>Pallets</label><input name="pallets" type="number" value="0" min="0"></div>
+      </div>
+      <label>Weight (kg)</label><input name="weight_kg" type="number" step="0.1" value="0">
+      <label>Weight per pallet (kg)</label><input name="weight_per_pallet" type="number" step="0.1" value="0">
+      <div class="grid2">
+        <div><label>Pallet L (cm)</label><input name="pallet_length" type="number" value="120"></div>
+        <div><label>Pallet W (cm)</label><input name="pallet_width" type="number" value="100"></div>
+      </div>
+      <label>Pallet height (cm)</label><input name="pallet_height" type="number" value="0">
+      <div class="grid2">
+        <div><label>Collection date</label><input name="collection_date" type="date"></div>
+        <div><label>Collection time</label><input name="collection_time" type="time"></div>
+      </div>
+      <div class="grid2">
+        <div><label>Timing</label>
+          <select name="timing"><option value="booked">Booked date</option><option value="same-day">Same day</option><option value="48h">Within 48h</option></select></div>
+        <div><label>Delivery date</label><input name="delivery_date" type="date"></div>
+      </div>
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn block big" style="margin-top:.6rem">Place order</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Your recent orders</h2>
+    <table>
+      <thead><tr><th>Ref</th><th>To</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+        <tr><td class="mono">{{ o.ref }}</td><td>{{ o.recipient }}<br><span class="small muted">{{ o.postcode }}</span></td>
+        <td><span class="pill {{ o.status }}">{{ o.status }}</span></td>
+        <td><a class="small" href="{{ url_for('track', ref=o.ref) }}">Track</a> ·
+            <a class="small" href="{{ url_for('portal_label', oid=o.id) }}">Label</a></td></tr>
+      {% else %}<tr><td colspan="4" class="muted">No orders yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

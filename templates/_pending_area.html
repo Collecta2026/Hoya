@@ -1,0 +1,32 @@
+{# board body — reused by full page and the 20s live fragment #}
+<div class="sumstrip">
+  <div><div class="b">{{ col_tot.jobs }}</div><div class="l">Collections</div></div>
+  <div><div class="b">{{ col_tot.pallets }}</div><div class="l">Coll. pallets</div></div>
+  <div><div class="b">{{ col_tot.parcels }}</div><div class="l">Coll. parcels</div></div>
+  <div style="border-left:1px solid #33414f;padding-left:1.5rem"><div class="b">{{ del_tot.jobs }}</div><div class="l">Deliveries</div></div>
+  <div><div class="b">{{ del_tot.pallets }}</div><div class="l">Del. pallets</div></div>
+  <div><div class="b">{{ del_tot.parcels }}</div><div class="l">Del. parcels</div></div>
+</div>
+
+{% macro rowtable(list) %}
+<table>
+  <thead><tr><th>Ref</th><th>Customer</th><th>Goods</th><th>Coll&rarr;Del</th><th>Coll date</th><th>Del date</th><th>SLA</th><th>Allocate driver / van</th><th></th><th>Status</th></tr></thead>
+  <tbody>
+  {% for o in list %}{% include "_pending_row.html" %}{% else %}<tr><td colspan="10" class="muted">Nothing pending.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% if view == 'resource' %}
+  {% for name, list in groups %}
+  <div class="card">
+    <h2>{{ name }} <span class="muted small">{{ list|length }} job(s)</span></h2>
+    {{ rowtable(list) }}
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="board-cols">
+    <div class="card"><h2>Awaiting collection <span class="pill unassigned">{{ col_tot.jobs }}</span></h2>{{ rowtable(collections) }}</div>
+    <div class="card"><h2>Awaiting delivery <span class="pill out">{{ del_tot.jobs }}</span></h2>{{ rowtable(deliveries) }}</div>
+  </div>
+{% endif %}

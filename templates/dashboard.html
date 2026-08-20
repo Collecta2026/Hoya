@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Control board{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Control board <span class="muted small">— {{ today.strftime('%A %d %B') }}</span></h1>
+  <div class="actions">
+    <a class="btn ghost" href="{{ url_for('order_new') }}">+ Order</a>
+    <a class="btn teal" href="{{ url_for('pending_board') }}">Pending board</a>
+    <a class="btn" href="{{ url_for('route_plan') }}">Plan route</a>
+  </div>
+</div>
+
+<div class="tiles">
+  <div class="tile unassigned"><div class="n">{{ counts.unassigned }}</div><div class="l">Unassigned</div></div>
+  <div class="tile out"><div class="n">{{ counts.out }}</div><div class="l">Out for delivery</div></div>
+  <div class="tile delivered"><div class="n">{{ counts.delivered }}</div><div class="l">Delivered today</div></div>
+  <div class="tile failed"><div class="n">{{ counts.failed }}</div><div class="l">Failed</div></div>
+</div>
+
+<div class="split">
+  <div class="card">
+    <h2>Today's routes</h2>
+    {% if routes %}
+    <table>
+      <thead><tr><th>Ref</th><th>Name</th><th>Driver</th><th>Vehicle</th><th>Stops</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for r in routes %}
+        <tr>
+          <td class="mono">{{ r.ref }}</td>
+          <td>{{ r.name }}</td>
+          <td>{{ r.driver.user.name if r.driver else '—' }}</td>
+          <td class="mono">{{ r.vehicle.reg if r.vehicle else '—' }}</td>
+          <td>{% set done = r.stops|selectattr('status','in',['delivered','failed'])|list|length %}{{ done }}/{{ r.stops|length }}</td>
+          <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+          <td><a class="btn sm ghost" href="{{ url_for('route_detail', rid=r.id) }}">Open</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">No routes yet for today. <a href="{{ url_for('route_plan') }}">Plan one →</a></p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Unassigned orders <span class="pill unassigned">{{ unassigned|length }}</span></h2>
+    {% if unassigned %}
+      {% for o in unassigned[:12] %}
+      <div class="stopline">
+        <div class="stopmeta">
+          <b>{{ o.recipient or o.customer.name }}</b>
+          <span class="small muted">{{ o.customer.name }} · {{ o.postcode }} · {{ o.pallets }} plt · £{{ '%.2f'|format(o.price) }}</span>
+        </div>
+        <span class="mono small">{{ o.ref }}</span>
+      </div>
+      {% endfor %}
+      <a class="btn teal sm" style="margin-top:.8rem" href="{{ url_for('route_plan') }}">Build into a route →</a>
+    {% else %}<p class="muted">Nothing waiting. All orders are on a route.</p>{% endif %}
+  </div>
+</div>
+{% endblock %}

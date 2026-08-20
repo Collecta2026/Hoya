@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% set hide_nav = true %}
+{% block title %}Labels {{ o.ref }}{% endblock %}
+{% block body %}
+<div class="noprint" style="max-width:640px;margin:0 auto 1rem">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h1 style="margin:0">Labels · {{ o.ref }}</h1>
+    <div class="actions">
+      <a class="btn ghost" href="{{ url_for('orders') }}">Back</a>
+      <button class="btn" onclick="window.print()">Print labels</button>
+    </div>
+  </div>
+  <p class="muted small">One 4×4″ label per pallet ({{ o.pallet_count }}), plus a parcel label if there are loose parcels. Set your printer to 4×4 (100×100mm) and 100% scale.</p>
+</div>
+
+<div class="labelsheet">
+  {% set total_w = '%.0f'|format(o.weight_kg or 0) %}
+  {% set n = o.pallet_count %}
+  {% for i in range(1, n + 1) %}
+  <div class="label">
+    <div class="lh"><span class="brand">VOYA</span><span class="svc">{{ o.service }}<br>{{ o.job_type }}</span></div>
+    <div class="to"><span class="muted">Deliver to</span><br><b>{{ o.recipient or o.customer.name }}</b><br>{{ o.delivery_address or o.address }}</div>
+    <div class="big">{{ o.delivery_postcode or o.postcode }}</div>
+    <div class="grid">
+      <span>Pallet <b>{{ i }} of {{ n }}</b></span>
+      <span>This pallet: <b>{{ '%.0f'|format((o.weight_kg or 0) / n) if n else 0 }} kg</b></span>
+    </div>
+    <div class="grid"><span>Shipment total: <b>{{ total_w }} kg</b></span><span>{{ o.customer.name }}</span></div>
+    <div class="bc"><svg class="barcode" data-code="{{ o.ref }}-L{{ i }}"></svg>
+      <div class="ref">{{ o.ref }}-L{{ i }}</div></div>
+  </div>
+  {% endfor %}
+  {% if o.parcels %}
+  <div class="label">
+    <div class="lh"><span class="brand">VOYA</span><span class="svc">{{ o.service }}<br>parcels</span></div>
+    <div class="to"><span class="muted">Deliver to</span><br><b>{{ o.recipient or o.customer.name }}</b><br>{{ o.delivery_address or o.address }}</div>
+    <div class="big">{{ o.delivery_postcode or o.postcode }}</div>
+    <div class="grid"><span>Parcels: <b>{{ o.parcels }}</b></span><span>Shipment total: <b>{{ total_w }} kg</b></span></div>
+    <div class="bc"><svg class="barcode" data-code="{{ o.ref }}"></svg><div class="ref">{{ o.ref }}</div></div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script>
+document.querySelectorAll('.barcode').forEach(function(el){
+  try{ JsBarcode(el, el.dataset.code, {format:"CODE128",displayValue:false,margin:0,height:56}); }catch(e){}
+});
+</script>
+{% endblock %}

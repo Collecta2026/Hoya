@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}My routes{% endblock %}
+{% block body %}
+<div class="phone">
+  {% if allocated %}
+  <h1>Allocated to me</h1>
+  <div class="card">
+  {% for o in allocated %}
+    <div class="stopline">
+      <div class="stopmeta"><b>{{ o.recipient or o.customer.name }}</b>
+        <span class="small muted">{{ o.job_type|capitalize }} · {{ o.delivery_postcode or o.postcode }} · {{ o.ref }}
+        {% if o.collection_date %}· {{ o.collection_date.strftime('%d %b') }} {{ o.collection_time or '' }}{% endif %}</span></div>
+      <span class="pill {{ o.status }}">{{ o.status }}</span>
+    </div>
+  {% endfor %}
+  </div>
+  {% endif %}
+  <h1>My routes</h1>
+  {% if routes %}
+    {% for r in routes %}
+    {% set done = r.stops|selectattr('status','in',['delivered','failed'])|list|length %}
+    <a class="drivercard" href="{{ url_for('driver_route', rid=r.id) }}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b>{{ r.name }}</b><span class="pill {{ r.status }}">{{ r.status }}</span>
+      </div>
+      <div class="muted small" style="margin-top:.3rem">
+        {{ r.run_date.strftime('%a %d %b') }} · {{ r.vehicle.reg if r.vehicle else 'no vehicle' }}
+        · {{ done }}/{{ r.stops|length }} done
+      </div>
+    </a>
+    {% endfor %}
+  {% else %}
+    <div class="card"><p class="muted">No routes assigned to you yet. Check back once dispatch has planned your round.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

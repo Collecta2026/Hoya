@@ -98,3 +98,43 @@ def optimise_sequence(stops, start_postcode="PR2 2TE"):
         ordered.append(nxt[0])
         cur = nxt[1]
     return ordered, round(total, 1)
+
+
+# UK postcode area -> region (for zone-based rate multipliers)
+REGION_OF = {
+    "PR": "North West", "BB": "North West", "BL": "North West", "FY": "North West",
+    "L": "North West", "WA": "North West", "WN": "North West", "M": "North West",
+    "OL": "North West", "SK": "North West", "CW": "North West", "CH": "North West",
+    "LA": "North West", "CA": "North West",
+    "NE": "North East", "SR": "North East", "DH": "North East", "DL": "North East",
+    "TS": "North East",
+    "LS": "Yorkshire", "BD": "Yorkshire", "HX": "Yorkshire", "HD": "Yorkshire",
+    "WF": "Yorkshire", "S": "Yorkshire", "DN": "Yorkshire", "YO": "Yorkshire",
+    "HU": "Yorkshire",
+    "DE": "East Midlands", "NG": "East Midlands", "LE": "East Midlands",
+    "NN": "East Midlands",
+    "B": "West Midlands", "CV": "West Midlands", "WV": "West Midlands",
+    "ST": "West Midlands", "TF": "West Midlands", "SY": "West Midlands",
+    "WR": "West Midlands", "HR": "West Midlands", "GL": "West Midlands",
+    "CF": "Wales", "SA": "Wales", "NP": "Wales", "LD": "Wales",
+    "BS": "South West", "BA": "South West", "TA": "South West", "EX": "South West",
+    "PL": "South West", "TQ": "South West", "TR": "South West", "DT": "South West",
+    "SP": "South West", "BH": "South West",
+    "OX": "South East", "RG": "South East", "GU": "South East", "RH": "South East",
+    "TN": "South East", "ME": "South East", "CT": "South East", "BN": "South East",
+    "PO": "South East", "SO": "South East", "SL": "South East", "HP": "South East",
+    "LU": "South East", "MK": "South East", "AL": "South East", "SG": "South East",
+    "CB": "East", "PE": "East", "NR": "East", "IP": "East", "CO": "East", "CM": "East",
+    "E": "London", "EC": "London", "N": "London", "NW": "London", "SE": "London",
+    "SW": "London", "W": "London", "WC": "London", "BR": "London", "CR": "London",
+    "DA": "London", "EN": "London", "HA": "London", "KT": "London", "SM": "London",
+    "TW": "London", "UB": "London", "WD": "London",
+}
+REGIONS = ["North West", "North East", "Yorkshire", "East Midlands",
+           "West Midlands", "Wales", "South West", "South East", "East",
+           "London", "Other"]
+
+
+def region_of(postcode):
+    a = _area(postcode)
+    return REGION_OF.get(a, "Other")

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% set hide_nav = true %}
+{% block title %}Track{% endblock %}
+{% block body %}
+<div class="topbar"><a class="brand" href="{{ url_for('portal_home') }}"><span class="dot"></span>Vo<span>ya</span></a>
+  <nav class="nav">
+    <a class="navtop" href="{{ url_for('portal_home') }}">New order</a>
+    <a class="navtop active" href="{{ url_for('portal_track') }}">Track shipments</a>
+    <a class="navtop" href="{{ url_for('portal_invoices') }}">Invoices</a>
+  </nav>
+  <div class="who">{{ c.name }} &middot; <a href="{{ url_for('portal_logout') }}">Sign out</a></div></div>
+
+<h1 style="margin-top:1rem">Out for delivery <span class="pill out">{{ active|length }}</span></h1>
+<div class="card">
+  {% if active %}
+    {% for o in active %}
+    <div class="stopline">
+      <div class="stopmeta"><b>{{ o.recipient or o.delivery_address }}</b>
+        <span class="small muted">{{ o.job_type|capitalize }} · {{ o.delivery_postcode or o.postcode }} · {{ o.ref }}</span></div>
+      <span class="pill {{ o.status }}">{{ o.status }}</span>
+      <a class="small" href="{{ url_for('track', ref=o.ref) }}">Track</a>
+    </div>
+    {% endfor %}
+  {% else %}<p class="muted">Nothing out for delivery right now.</p>{% endif %}
+</div>
+
+<h2>All recent shipments</h2>
+<div class="card">
+<table>
+  <thead><tr><th>Ref</th><th>Type</th><th>To</th><th>Collection</th><th>Delivery</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for o in recent %}
+    <tr><td class="mono">{{ o.ref }}</td><td>{{ o.job_type }}</td>
+    <td>{{ o.recipient or o.delivery_address }}<br><span class="small muted">{{ o.delivery_postcode or o.postcode }}</span></td>
+    <td class="small">{{ o.collection_date.strftime('%d %b') if o.collection_date else '—' }} {{ o.collection_time or '' }}</td>
+    <td class="small">{{ o.delivery_date.strftime('%d %b') if o.delivery_date else '—' }}<br><span class="muted">{{ o.timing }}</span></td>
+    <td><span class="pill {{ o.status }}">{{ o.status }}</span></td>
+    <td><a class="small" href="{{ url_for('track', ref=o.ref) }}">Track</a> ·
+        <a class="small" href="{{ url_for('portal_label', oid=o.id) }}">Label</a></td></tr>
+  {% else %}<tr><td colspan="7" class="muted">No shipments yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

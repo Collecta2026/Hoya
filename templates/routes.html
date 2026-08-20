@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Routes{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Routes</h1><a class="btn" href="{{ url_for('route_plan') }}">Plan route</a>
+</div>
+<div class="card">
+<table>
+  <thead><tr><th>Ref</th><th>Date</th><th>Name</th><th>Driver</th><th>Vehicle</th><th>Stops</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for r in routes %}
+    <tr>
+      <td class="mono">{{ r.ref }}</td><td>{{ r.run_date.strftime('%d %b') }}</td><td>{{ r.name }}</td>
+      <td>{{ r.driver.user.name if r.driver else '—' }}</td>
+      <td class="mono">{{ r.vehicle.reg if r.vehicle else '—' }}</td>
+      <td>{% set done = r.stops|selectattr('status','in',['delivered','failed'])|list|length %}{{ done }}/{{ r.stops|length }}</td>
+      <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+      <td><a class="btn sm ghost" href="{{ url_for('route_detail', rid=r.id) }}">Open</a></td>
+    </tr>
+  {% else %}<tr><td colspan="8" class="muted">No routes yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

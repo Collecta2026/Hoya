@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% set hide_nav = true %}
+{% block title %}{{ code }}{% endblock %}
+{% block body %}
+<div class="wrap narrow" style="text-align:center">
+  <h1 style="font-size:3rem;margin-bottom:0">{{ code }}</h1>
+  <p class="muted">{{ msg }}</p>
+  <a class="btn" href="/">Back to start</a>
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{# one order row for the pending board. expects: o, sla, drivers, vehicles #}
+{% set sc, sl = sla[o.id] %}
+<tr class="{{ sc }}">
+  <td class="mono"><a href="{{ url_for('order_detail', oid=o.id) }}">{{ o.ref }}</a></td>
+  <td>{{ o.customer.name }}</td>
+  <td class="small">{{ o.pallet_count }} plt / {{ o.parcels }} pcl<br><span class="muted">{{ '%.0f'|format(o.weight_kg or 0) }} kg</span></td>
+  <td class="mono small">{{ o.collection_postcode }} &rarr; {{ o.delivery_postcode }}</td>
+  <td class="small">{{ o.collection_date.strftime('%d %b') if o.collection_date else '—' }}{% if o.collection_time %}<br><span class="muted">{{ o.collection_time }}</span>{% endif %}</td>
+  <td class="small">{{ o.delivery_date.strftime('%d %b') if o.delivery_date else '—' }}<br><span class="muted">{{ o.timing }}</span></td>
+  <td>{% if sl and sl!='on time' %}<span class="slatag {{ sc }}">{{ sl }}</span>{% else %}<span class="small muted">on time</span>{% endif %}</td>
+  <td>
+    <form method="post" action="{{ url_for('pending_allocate', oid=o.id) }}" class="mini inline" style="gap:.25rem">
+      <select name="driver_id" onchange="this.form.submit()">
+        <option value="">driver…</option>
+        {% for d in drivers %}<option value="{{ d.id }}" {{ 'selected' if o.assigned_driver_id==d.id }}>{{ d.user.name if d.user else 'Driver' }}</option>{% endfor %}
+      </select>
+      <select name="vehicle_id" onchange="this.form.submit()">
+        <option value="">van…</option>
+        {% for v in vehicles %}<option value="{{ v.id }}" {{ 'selected' if o.assigned_vehicle_id==v.id }}>{{ v.reg }} ({{ v.vtype }}/{{ v.capacity_pallets }})</option>{% endfor %}
+      </select>
+    </form>
+  </td>
+  <td>
+    <form method="post" action="{{ url_for('pending_suggest', oid=o.id) }}" style="margin:0">
+      <button class="btn sm ghost mini">Suggest</button></form>
+  </td>
+  <td><span class="pill {{ 'out' if o.board_status=='on route' else ('assigned' if o.board_status=='allocated' else 'unassigned') }}">{{ o.board_status }}</span></td>
+</tr>

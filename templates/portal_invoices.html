@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% set hide_nav = true %}
+{% block title %}Invoices{% endblock %}
+{% block body %}
+<div class="topbar"><a class="brand" href="{{ url_for('portal_home') }}"><span class="dot"></span>Vo<span>ya</span></a>
+  <nav class="nav">
+    <a class="navtop" href="{{ url_for('portal_home') }}">New order</a>
+    <a class="navtop" href="{{ url_for('portal_track') }}">Track shipments</a>
+    <a class="navtop active" href="{{ url_for('portal_invoices') }}">Invoices</a>
+  </nav>
+  <div class="who">{{ c.name }} &middot; <a href="{{ url_for('portal_logout') }}">Sign out</a></div></div>
+
+<h1 style="margin-top:1rem">Your invoices</h1>
+<div class="card">
+<table>
+  <thead><tr><th>Invoice</th><th>Period</th><th>Shipments</th><th>Total (inc VAT)</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for i in invoices %}
+    <tr><td class="mono">{{ i.ref }}</td>
+    <td class="small">{{ i.period_start.strftime('%d %b') }}–{{ i.period_end.strftime('%d %b') }}</td>
+    <td>{{ i.lines|length }}</td><td>£{{ '%.2f'|format(i.total) }}</td>
+    <td><span class="pill {{ 'delivered' if i.status=='paid' else ('out' if i.status=='sent' else 'pending') }}">{{ i.status }}</span></td>
+    <td><a class="btn sm ghost" href="{{ url_for('portal_invoice', iid=i.id) }}">View</a></td></tr>
+  {% else %}<tr><td colspan="6" class="muted">No invoices yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+<p class="small muted" style="margin-top:.6rem">Each invoice lists every shipment with its collection and delivery address, pallets, weight, charges and a link to view the proof-of-delivery photo.</p>
+</div>
+{% endblock %}

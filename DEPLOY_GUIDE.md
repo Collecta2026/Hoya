@@ -36,7 +36,7 @@ Here's the full stack and what each piece is for:
 |---|---|---|
 | **GitHub** | Stores your code; Render deploys from it | Free |
 | **Render** | The host — runs the web app, the database, and the backup job | ~£20/mo (paid tier = always-on, fast) |
-| **Render Postgres** | The database — all your orders, PODs, KPIs live here | Included above (~£6/mo tier) |
+| **Neon (Postgres)** | The database — all your orders, PODs, KPIs — same stack as your cashflow app | Free tier; ~£19/mo paid when you scale |
 | **Gunicorn** | The production web server inside the app (already configured) | Free (in the code) |
 | **Twilio** | Sends the real customer text messages | Pay-as-you-go (~2–4p/text) |
 | **Cloudflare R2** *(or AWS S3)* | Off-site copy of your backups | Free tier covers you |
@@ -56,8 +56,9 @@ last point is the same latency lesson from the cashflow app, handled up front.
 
 1. **GitHub** — https://github.com (sign up if you don't have one)
 2. **Render** — https://render.com (sign up; you can use your GitHub login)
-3. **Twilio** — https://www.twilio.com (for live SMS; you can do this after go-live)
-4. **A domain** — buy `voyahq.com` (or your chosen name) from any registrar
+3. **Neon** — https://neon.tech (the database; you likely already have an account from the cashflow app)
+4. **Twilio** — https://www.twilio.com (for live SMS; you can do this after go-live)
+5. **A domain** — buy `voyahq.com` (or your chosen name) from any registrar
    (Cloudflare, Namecheap, GoDaddy). *Don't* try for voya.com — it's taken.
 
 Have the `voya.zip` file from this chat unzipped into a folder on your PC.
@@ -85,18 +86,33 @@ the app.
 
 ---
 
-## Step 2 — Deploy on Render (10 min, mostly waiting)
+## Step 2 — Create the Neon database (5 min)
+
+Same as your cashflow app's database, so this will feel familiar.
+
+1. Log in to https://neon.tech and click **New Project**.
+2. Name it `voya`, and **choose a London / EU region** (keeps it close to the
+   app for speed — the same reason we moved the cashflow DB to London).
+3. Once created, open **Connection Details** and copy the **Pooled** connection
+   string (the host has `-pooler` in it — use that one; it handles the app's
+   multiple workers cleanly). It looks like
+   `postgresql://user:pass@ep-xxx-pooler.eu-...neon.tech/voya?sslmode=require`.
+4. Keep that string handy — you'll paste it into Render in the next step.
+
+## Step 3 — Deploy on Render (10 min, mostly waiting)
 
 1. Log in to https://dashboard.render.com.
 2. Click **New +** (top right) → **Blueprint**.
 3. Connect your GitHub and pick the **voya** repository.
-4. Render reads the `render.yaml` file and shows it will create three things:
-   a **web service** (voya), a **Postgres database** (voya-db), and a
-   **backup job** (voya-backup). Click **Apply**.
+4. Render reads the `render.yaml` file and shows it will create two things:
+   a **web service** (voya) and a **backup job** (voya-backup). The database
+   isn't here because it's your **Neon** project. Click **Apply**.
 5. It now asks you to fill the "sync: false" values it left blank. Set:
+   - **DATABASE_URL** → paste the **Neon pooled connection string** from Step 2
+     (set it on **both** the web service and the backup job).
    - **ADMIN_EMAIL** → your real email (this becomes your login)
    - **ADMIN_PASSWORD** → a strong password you'll remember
-   - Leave the Twilio and backup ones blank for now — you'll add them later.
+   - Leave the Twilio and backup-bucket ones blank for now — you'll add them later.
 6. Click **Apply / Create**. Render builds everything. Give it a few minutes;
    when the web service shows **Live** (green), it's up.
 
@@ -108,7 +124,7 @@ Because `SEED_DEMO` is set to **false** in the blueprint, you start with a
 
 ---
 
-## Step 3 — Point your own domain at it (10 min + DNS wait)
+## Step 4 — Point your own domain at it (10 min + DNS wait)
 
 1. In Render, open the **voya** web service → **Settings** → **Custom Domains**
    → **Add Custom Domain**. Enter `app.voyahq.com` (a subdomain is cleanest).
@@ -122,7 +138,7 @@ Drivers and customers now use `https://app.voyahq.com`.
 
 ---
 
-## Step 4 — Turn on real customer texts (10 min)
+## Step 5 — Turn on real customer texts (10 min)
 
 Until you do this, texts are **logged** (visible under **Messages** in the app)
 but not actually sent — useful for testing, not for live.
@@ -140,15 +156,15 @@ but not actually sent — useful for testing, not for live.
 
 ---
 
-## Step 5 — Set up frequent, safe backups (15 min)
+## Step 6 — Set up frequent, safe backups (15 min)
 
 You get **two layers**, which is what you want:
 
-**Layer 1 — the database's own backups (automatic).**
-Because the blueprint puts Postgres on a **paid tier**, Render takes **daily
-backups automatically** and keeps point-in-time recovery. Nothing to do — but
-verify it: Render → **voya-db** → **Backups** tab. You'll see them listed, and
-you can restore from here in a couple of clicks if you ever need to.
+**Layer 1 — Neon's own history/restore (automatic).**
+Neon continuously keeps a restore history, so you can roll the database back to
+an earlier point in time from the Neon console (**Restore** / branch from
+history). On the free tier this window is short; a paid Neon plan extends it.
+Nothing to set up — but open the Neon console once so you know where it is.
 
 **Layer 2 — your own off-site snapshots every 6 hours (set this up).**
 The blueprint includes a **backup job** that snapshots the whole database four
@@ -176,7 +192,7 @@ this before any big change.
 
 ---
 
-## Step 6 — Speed & stability checklist (already handled, but verify)
+## Step 7 — Speed & stability checklist (already handled, but verify)
 
 Most of this is baked in; just confirm:
 
@@ -196,7 +212,7 @@ Most of this is baked in; just confirm:
 
 ---
 
-## Step 7 — Load Heliolink's real data (20 min)
+## Step 8 — Load Heliolink's real data (20 min)
 
 Logged in as admin:
 
@@ -212,7 +228,7 @@ Logged in as admin:
 
 ---
 
-## Step 8 — Get the app onto drivers' phones (5 min each)
+## Step 9 — Get the app onto drivers' phones (5 min each)
 
 Voya installs like an app without any app store:
 
@@ -224,6 +240,20 @@ Voya installs like an app without any app store:
    a normal app. Camera scanning and signature capture work straight away.
 
 ---
+
+## Optional — hardware barcode scanners
+
+Voya scans with the **phone camera** out of the box (free, works today). For
+high-volume rounds you can pair a **Bluetooth scanner** to the driver's phone —
+it types the barcode straight into Voya's scan box (the box now accepts the
+scanner's Enter keystroke, so there's nothing to configure). Buy **2D imagers**
+(they read courier QR and DataMatrix labels, not just old barcodes):
+
+- **Budget / best value:** NETUM 3-in-1 (Bluetooth + 2.4G + USB), ~£80–130.
+- **Rugged / all-day:** Zebra CS60 or Socket Mobile DuraScan, ~£200–350.
+
+Pair it once via the phone's Bluetooth settings, open a stop's scan screen, tap
+the barcode box, and scan — each read logs exactly like a camera scan.
 
 ## Go-live checklist
 

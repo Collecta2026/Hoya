@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Reports & KPIs{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Operational KPIs</h1>
+  <div class="actions">
+    <a class="btn ghost sm" href="{{ url_for('reports_export') }}">Export CSV</a>
+    {% if user.role=='admin' %}<a class="btn ghost sm" href="{{ url_for('admin_backup') }}">Download backup</a>{% endif %}
+  </div>
+</div>
+
+<div class="actions" style="margin-bottom:1rem">
+  <a class="btn sm {{ '' if k.period=='1' else 'ghost' }}" href="?period=1">Today</a>
+  <a class="btn sm {{ '' if k.period=='7' else 'ghost' }}" href="?period=7">7 days</a>
+  <a class="btn sm {{ '' if k.period=='30' else 'ghost' }}" href="?period=30">30 days</a>
+  <a class="btn sm {{ '' if k.period=='all' else 'ghost' }}" href="?period=all">All time</a>
+</div>
+
+<div class="tiles">
+  <div class="tile delivered"><div class="n">{{ k.parcels_total }}</div><div class="l">Parcels handled</div></div>
+  <div class="tile"><div class="n">{{ k.pallets_total }}</div><div class="l">Pallets handled</div></div>
+  <div class="tile out"><div class="n">{{ k.drops }}</div><div class="l">Drops completed</div></div>
+  <div class="tile"><div class="n">{{ k.collections }}</div><div class="l">Collections done</div></div>
+</div>
+<div class="tiles">
+  <div class="tile delivered"><div class="n">{{ k.success }}%</div><div class="l">Success rate</div></div>
+  <div class="tile"><div class="n">{{ k.difot }}%</div><div class="l">Delivered in full</div></div>
+  <div class="tile failed"><div class="n">{{ k.failed }}</div><div class="l">Failed stops</div></div>
+  <div class="tile"><div class="n">{{ k.routes_run }}</div><div class="l">Routes run</div></div>
+</div>
+
+<div class="split">
+  <div class="card">
+    <h2>Volume breakdown</h2>
+    <table>
+      <thead><tr><th></th><th>Delivered</th><th>Collected</th><th>Total</th></tr></thead>
+      <tbody>
+        <tr><td><b>Parcels</b></td><td>{{ k.parcels_del }}</td><td>{{ k.parcels_col }}</td><td>{{ k.parcels_total }}</td></tr>
+        <tr><td><b>Pallets</b></td><td>{{ k.pallets_del }}</td><td>{{ k.pallets_col }}</td><td>{{ k.pallets_total }}</td></tr>
+        <tr><td><b>Stops</b></td><td>{{ k.drops }}</td><td>{{ k.collections }}</td><td>{{ k.completed }}</td></tr>
+      </tbody>
+    </table>
+    <p class="small muted" style="margin-top:.8rem">Revenue on completed jobs in this period:
+      <b>£{{ '%.2f'|format(k.revenue) }}</b></p>
+  </div>
+  <div class="card">
+    <h2>Driver performance</h2>
+    <table><thead><tr><th>Driver</th><th>Done</th><th>Failed</th><th>Rate</th></tr></thead><tbody>
+    {% for d in driver_rows %}
+      <tr><td>{{ d.name }}</td><td>{{ d.done }}</td><td>{{ d.failed }}</td><td>{{ d.rate }}%</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No completed stops in this period.</td></tr>{% endfor %}
+    </tbody></table>
+    <p class="small muted" style="margin-top:.8rem">Delivered in full = every scanned item accounted for at the drop.</p>
+  </div>
+</div>
+{% endblock %}

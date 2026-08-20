@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Surcharges{% endblock %}
+{% block body %}
+<h1>Surcharges &amp; fuel</h1>
+<p class="muted small">Standard accessorial charges applied per shipment. Fuel surcharge is a percentage of carriage, set per customer on their rate card (default 15%).</p>
+<div class="split">
+  <div class="card">
+    <h2>Surcharge catalogue</h2>
+    <table>
+      <thead><tr><th>Code</th><th>Name</th><th>Basis</th><th>Amount</th><th>Active</th><th></th></tr></thead>
+      <tbody>
+      {% for s in surcharges %}
+      <tr>
+        <td class="mono">{{ s.code }}</td>
+        <td>{{ s.name }}</td>
+        <td class="small muted">{{ {'flat':'£ per shipment','per_pallet':'£ per pallet','percent':'% of carriage'}[s.kind] }}</td>
+        <td>
+          <form method="post" action="{{ url_for('surcharge_update', sid=s.id) }}" class="inline" style="gap:.3rem">
+            <input name="amount" type="number" step="0.01" value="{{ '%.2f'|format(s.amount) }}" style="width:90px">
+            <label class="small" style="margin:0"><input type="checkbox" name="active" {{ 'checked' if s.active }} style="width:auto"> on</label>
+            <button class="btn sm ghost">Save</button>
+          </form>
+        </td>
+        <td>{% if s.active %}<span class="pill delivered">yes</span>{% else %}<span class="pill failed">no</span>{% endif %}</td>
+        <td></td>
+      </tr>
+      {% else %}<tr><td colspan="6" class="muted">No surcharges yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Add a surcharge</h2>
+    <form method="post">
+      <label>Code</label><input name="code" required placeholder="e.g. TAIL">
+      <label>Name</label><input name="name" required placeholder="Tail-lift delivery">
+      <label>Basis</label>
+      <select name="kind">
+        <option value="flat">£ per shipment</option>
+        <option value="per_pallet">£ per pallet</option>
+        <option value="percent">% of carriage</option>
+      </select>
+      <label>Amount</label><input name="amount" type="number" step="0.01" value="0">
+      <button class="btn block" style="margin-top:.8rem">Add surcharge</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Rate calculator{% endblock %}
+{% block body %}
+<h1>Rate calculator</h1>
+<p class="muted small">Enter the job and the system recommends a standard rate from the cost model. Apply a discount or type a manual rate to override.</p>
+<div class="split">
+  <div class="card">
+    <h2>Job</h2>
+    <label>Delivery postcode</label><input id="postcode" placeholder="M1 1AA">
+    <div class="grid2">
+      <div><label>Pallets</label><input id="pallets" type="number" value="2"></div>
+      <div><label>Weight per pallet (kg)</label><input id="wpp" type="number" value="300"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Service</label><select id="service"><option value="48">48-hour</option><option value="24">24-hour</option></select></div>
+      <div><label>Van</label><select id="vtype"><option value="">auto by pallets</option><option value="panel van">panel van</option><option value="2.5t">2.5t</option><option value="7.5t">7.5t</option></select></div>
+    </div>
+    <label>Discount %</label><input id="discount" type="number" value="0">
+    <button class="btn block big" style="margin-top:.8rem" onclick="calc()">Recommend rate</button>
+  </div>
+  <div class="card">
+    <h2>Recommended rate</h2>
+    <div id="out"><p class="muted">Enter a job and press <b>Recommend rate</b>.</p></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function calc(){
+  const q=new URLSearchParams({
+    postcode:document.getElementById('postcode').value,
+    pallets:document.getElementById('pallets').value||1,
+    weight_per_pallet:document.getElementById('wpp').value||0,
+    service:document.getElementById('service').value,
+    vtype:document.getElementById('vtype').value,
+    discount:document.getElementById('discount').value||0
+  });
+  const r=await fetch('/api/recommend?'+q); const d=await r.json();
+  document.getElementById('out').innerHTML=
+   '<table>'+
+   '<tr><td class="muted">Van</td><td>'+d.vtype+' @ '+d.mpg+' mpg</td></tr>'+
+   '<tr><td class="muted">Region</td><td>'+d.region+' (×'+d.zone_mult+')</td></tr>'+
+   '<tr><td class="muted">Miles</td><td>'+d.miles+'</td></tr>'+
+   '<tr><td class="muted">Fuel</td><td>'+d.litres+' L → £'+d.fuel_cost.toFixed(2)+'</td></tr>'+
+   '<tr><td class="muted">Driver time</td><td>'+d.drive_hours+'h + '+d.handling_hours+'h → £'+d.driver_cost.toFixed(2)+'</td></tr>'+
+   '<tr><td class="muted">Fixed</td><td>£'+d.fixed.toFixed(2)+'</td></tr>'+
+   '<tr><td class="muted">Total weight</td><td>'+d.total_weight+' kg</td></tr>'+
+   '<tr class="totrow"><td>Cost to serve</td><td>£'+d.cost.toFixed(2)+'</td></tr>'+
+   '<tr class="totrow"><td>Recommended (+'+d.margin_pct+'%)</td><td>£'+d.recommended.toFixed(2)+'</td></tr>'+
+   (d.discount_pct>0?'<tr class="totrow grand"><td>After '+d.discount_pct+'% discount</td><td>£'+d.net.toFixed(2)+'</td></tr>':'<tr class="totrow grand"><td>Charge</td><td>£'+d.recommended.toFixed(2)+'</td></tr>')+
+   '</table>'+
+   '<label style="margin-top:.6rem">Manual override £</label><input id="manual" type="number" placeholder="type to override" oninput="document.getElementById(\\'finalr\\').textContent=this.value?(\\'£\\'+parseFloat(this.value).toFixed(2)):(\\'£\\'+'+(d.net!=null?d.net:d.recommended)+'.toFixed(2))">'+
+   '<p style="margin-top:.5rem">Final rate: <b id="finalr" style="font-size:1.3rem">£'+(d.discount_pct>0?d.net:d.recommended).toFixed(2)+'</b></p>';
+}
+</script>
+{% endblock %}

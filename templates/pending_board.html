@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Pending work{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Pending work board <span class="small muted" id="livedot">● live</span></h1>
+  <div class="actions">
+    <a class="btn sm {{ '' if view=='status' else 'ghost' }}" href="{{ url_for('pending_board', view='status') }}">By status</a>
+    <a class="btn sm {{ '' if view=='resource' else 'ghost' }}" href="{{ url_for('pending_board', view='resource') }}">By driver/van</a>
+    <a class="btn ghost sm" href="{{ url_for('resources') }}">Resources</a>
+    <a class="btn sm" href="{{ url_for('order_new') }}">+ New job</a>
+  </div>
+</div>
+<div id="board">{% include "_pending_area.html" %}</div>
+{% endblock %}
+{% block scripts %}
+<script>
+// live refresh every 20s, paused while a dropdown is focused
+let paused=false;
+document.addEventListener('focusin',e=>{if(e.target.tagName==='SELECT')paused=true;});
+document.addEventListener('focusout',()=>{setTimeout(()=>paused=false,300);});
+setInterval(async()=>{
+  if(paused) return;
+  try{
+    const r=await fetch('{{ url_for("pending_board", view=view, fragment=1) }}');
+    document.getElementById('board').innerHTML=await r.text();
+  }catch(e){}
+},20000);
+</script>
+{% endblock %}

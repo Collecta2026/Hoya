@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Load {{ r.name }}{% endblock %}
+{% block body %}
+<div class="phone">
+  <p class="small"><a href="{{ url_for('driver_route', rid=r.id) }}">← {{ r.name }}</a></p>
+  <h1>Load van <span class="muted" id="progress" style="font-size:1rem">0/{{ items|length }}</span></h1>
+  <p class="muted small">Scan every parcel and pallet as you load. Anything not on the manifest flags up.</p>
+  {% set SCAN='load' %}{% include "_scanlist.html" %}
+  <script>const SCAN_TYPE='load'; const ROUTE_ID={{ r.id }};</script>
+  {% include "_scanner.html" %}
+</div>
+{% endblock %}

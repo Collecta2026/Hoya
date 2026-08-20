@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ r.name }}{% endblock %}
+{% block body %}
+<div class="phone">
+  <p class="small"><a href="{{ url_for('driver_home') }}">← My routes</a></p>
+  <h1>{{ r.name }}</h1>
+  <p class="muted small">{{ r.run_date.strftime('%a %d %b') }} · {{ r.stops|length }} stops · depot {{ r.start_postcode }}</p>
+  <a class="btn teal block" style="margin-bottom:1rem" href="{{ url_for('driver_load', rid=r.id) }}">📦 Load van (scan manifest)</a>
+  {% for s in r.stops %}
+  <a class="drivercard {{ s.status }}" href="{{ url_for('driver_stop', sid=s.id) }}"
+     style="display:flex;align-items:center;gap:.8rem">
+    <div class="seq {{ s.status }}">{{ s.sequence }}</div>
+    <div class="stopmeta">
+      <b>{{ s.order.recipient or s.order.customer.name }}</b>
+      <span class="small muted">{{ s.order.job_type|capitalize }} · {{ s.order.postcode }} · {{ s.order.parcels }}p/{{ s.order.pallet_count }}plt</span>
+    </div>
+    <span class="pill {{ s.status }}">{{ s.status }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

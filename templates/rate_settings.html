@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Standard rate card{% endblock %}
+{% block body %}
+<h1>Standard rate card — parameters</h1>
+<p class="muted small">These are the base cost inputs the system uses to <b>recommend</b> a rate for any job. Customers set to "standard" pricing are quoted from these figures (less their discount). Fuel consumption comes from each van; the per-type figures below are the fallback.</p>
+<div class="split">
+  <div class="card">
+    <h2>Cost inputs</h2>
+    <form method="post">
+      <div class="grid2">
+        <div><label>Fuel price (£/litre)</label><input name="fuel_price_per_litre" type="number" step="0.01" value="{{ '%.2f'|format(s.fuel_price_per_litre) }}"></div>
+        <div><label>Driver rate (£/hour)</label><input name="driver_rate_per_hour" type="number" step="0.01" value="{{ '%.2f'|format(s.driver_rate_per_hour) }}"></div>
+      </div>
+      <div class="grid2">
+        <div><label>Average road speed (mph)</label><input name="avg_speed_mph" type="number" step="1" value="{{ '%.0f'|format(s.avg_speed_mph) }}"></div>
+        <div><label>Handling time per pallet (min)</label><input name="handling_min_per_pallet" type="number" step="0.5" value="{{ s.handling_min_per_pallet }}"></div>
+      </div>
+      <div class="grid2">
+        <div><label>Fixed cost per job (£)</label><input name="fixed_cost_per_job" type="number" step="0.01" value="{{ '%.2f'|format(s.fixed_cost_per_job) }}"></div>
+        <div><label>Margin / markup %</label><input name="margin_pct" type="number" step="0.1" value="{{ s.margin_pct }}"></div>
+      </div>
+      <div class="grid2">
+        <div><label>24-hour service uplift %</label><input name="service_uplift_24h_pct" type="number" step="0.1" value="{{ s.service_uplift_24h_pct }}"></div>
+        <div><label style="display:flex;align-items:center;gap:.5rem;margin-top:1.8rem"><input type="checkbox" name="round_trip" {{ 'checked' if s.round_trip }} style="width:auto"> Cost the return leg (round trip)</label></div>
+      </div>
+      <h2 style="margin-top:1rem">Fuel consumption by van (fallback MPG)</h2>
+      <div class="grid2">
+        <div><label>Panel van</label><input name="mpg_panel" type="number" step="0.1" value="{{ s.mpg_panel }}"></div>
+        <div><label>2.5t</label><input name="mpg_25t" type="number" step="0.1" value="{{ s.mpg_25t }}"></div>
+      </div>
+      <label>7.5t</label><input name="mpg_75t" type="number" step="0.1" value="{{ s.mpg_75t }}">
+      <button class="btn block big" style="margin-top:.9rem">Save parameters</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Worked example</h2>
+    <p class="small muted">2 pallets · 300 kg · 48-hour · to M1 (Manchester)</p>
+    <table>
+      <tr><td class="muted">Van assumed</td><td>{{ sample.vtype }} @ {{ sample.mpg }} mpg</td></tr>
+      <tr><td class="muted">Region</td><td>{{ sample.region }} (×{{ sample.zone_mult }})</td></tr>
+      <tr><td class="muted">Miles ({{ 'round trip' if s.round_trip else 'one way' }})</td><td>{{ sample.miles }}</td></tr>
+      <tr><td class="muted">Fuel</td><td>{{ sample.litres }} L → £{{ '%.2f'|format(sample.fuel_cost) }}</td></tr>
+      <tr><td class="muted">Driver time</td><td>{{ sample.drive_hours }}h drive + {{ sample.handling_hours }}h handling → £{{ '%.2f'|format(sample.driver_cost) }}</td></tr>
+      <tr><td class="muted">Fixed</td><td>£{{ '%.2f'|format(sample.fixed) }}</td></tr>
+      <tr class="totrow"><td>Cost to serve</td><td>£{{ '%.2f'|format(sample.cost) }}</td></tr>
+      <tr class="totrow grand"><td>Recommended (+{{ sample.margin_pct }}%)</td><td>£{{ '%.2f'|format(sample.recommended) }}</td></tr>
+    </table>
+    <a class="btn block" style="margin-top:.8rem" href="{{ url_for('rate_calculator') }}">Open rate calculator</a>
+  </div>
+</div>
+{% endblock %}

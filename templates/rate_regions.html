@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Regions & zones{% endblock %}
+{% block body %}
+<h1>UK regions &amp; zone multipliers</h1>
+<p class="muted small">Postcodes are grouped into regions. The multiplier scales the cost for that region — leave at 1.0 for standard, raise it for remote/harder-to-serve areas (e.g. Highlands, South West).</p>
+<div class="card">
+<form method="post">
+  <table>
+    <thead><tr><th>Region</th><th>Postcode areas</th><th>Multiplier</th></tr></thead>
+    <tbody>
+    {% for z in zones %}
+    <tr>
+      <td><b>{{ z.region }}</b></td>
+      <td class="small muted">{{ (by_region[z.region]|sort|join(', ')) if z.region in by_region else '—' }}</td>
+      <td><input name="mult_{{ z.id }}" type="number" step="0.01" value="{{ '%.2f'|format(z.multiplier) }}" style="width:100px"></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <button class="btn block big" style="margin-top:.8rem">Save multipliers</button>
+</form>
+</div>
+{% endblock %}

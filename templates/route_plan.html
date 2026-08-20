@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Plan route{% endblock %}
+{% block body %}
+<h1>Plan a route</h1>
+<form method="post">
+<div class="split">
+  <div class="card">
+    <h2>Pick orders <span class="pill unassigned">{{ unassigned|length }} waiting</span></h2>
+    {% if unassigned %}
+      {% for o in unassigned %}
+      <label class="checkrow">
+        <input type="checkbox" name="order_ids" value="{{ o.id }}">
+        <span class="stopmeta"><b>{{ o.recipient or o.customer.name }}</b>
+        <span class="small muted">{{ o.customer.name }} · {{ o.postcode }} · {{ o.pallets }} plt</span></span>
+        <span class="mono small">{{ o.ref }}</span>
+      </label>
+      {% endfor %}
+    {% else %}<p class="muted">No unassigned orders.</p>{% endif %}
+  </div>
+  <div class="card">
+    <h2>Route details</h2>
+    <label>Route name</label><input name="name" placeholder="e.g. Cheshire round">
+    <label>Run date</label><input name="run_date" type="date" value="{{ today.isoformat() }}">
+    <label>Start (depot) postcode</label><input name="start_postcode" value="PR2 2TE">
+    <label>Driver</label>
+    <select name="driver_id"><option value="">— assign later —</option>
+      {% for d in drivers %}<option value="{{ d.id }}">{{ d.user.name }}</option>{% endfor %}</select>
+    <label>Vehicle</label>
+    <select name="vehicle_id"><option value="">— assign later —</option>
+      {% for v in vehicles %}<option value="{{ v.id }}">{{ v.reg }} ({{ v.vtype }})</option>{% endfor %}</select>
+    <button class="btn block big" style="margin-top:1rem">Build & optimise route</button>
+    <p class="small muted">Stops are automatically sequenced from the depot for the shortest round.</p>
+  </div>
+</div>
+</form>
+{% endblock %}

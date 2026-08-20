@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Customers{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Customers &amp; rate cards</h1>
+  <div class="actions">
+    <a class="btn ghost sm" href="{{ url_for('rate_template') }}">Download rate-card template</a>
+    <a class="btn" href="{{ url_for('customer_edit') }}">+ New customer</a>
+  </div>
+</div>
+<div class="card">
+  <form method="post" action="{{ url_for('rate_import') }}" enctype="multipart/form-data" class="inline">
+    <div style="flex:1"><label style="margin-top:0">Bulk upload rate cards (CSV)</label>
+      <input type="file" name="file" accept=".csv" required></div>
+    <button class="btn teal">Import</button>
+  </form>
+  <p class="small muted" style="margin-top:.5rem">Download the template above, fill one row per customer, and upload it here to create or update rate cards in bulk.</p>
+</div>
+<div class="card">
+<table>
+  <thead><tr><th>Customer</th><th>Contact</th><th>Base £/drop</th><th>£/mile</th><th>£/pallet</th><th>Fuel %</th><th>Portal code</th><th></th></tr></thead>
+  <tbody>
+  {% for c in customers %}
+    <tr><td><b>{{ c.name }}</b><br><span class="small muted">{{ c.postcode }}</span></td>
+    <td>{{ c.contact_name or '—' }}<br><span class="small muted">{{ c.phone or '' }}</span></td>
+    <td>£{{ '%.2f'|format(c.rate_base) }}</td><td>£{{ '%.2f'|format(c.rate_per_mile) }}</td>
+    <td>£{{ '%.2f'|format(c.rate_per_pallet) }}</td><td>{{ '%.0f'|format(c.fuel_surcharge_pct or 0) }}%</td><td class="mono">{{ c.portal_code }}</td>
+    <td><a class="btn sm ghost" href="{{ url_for('customer_edit', cid=c.id) }}">Edit</a></td></tr>
+  {% else %}<tr><td colspan="8" class="muted">No customers.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

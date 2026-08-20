@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}Voya{% endblock %} · Voya</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1b2430">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if user and not hide_nav %}
+<div class="topbar">
+  <a class="brand" href="/"><span class="dot"></span>Vo<span>ya</span></a>
+  {% if user.role in ['admin','dispatcher'] %}
+  <nav class="nav">
+    <div class="navgroup">
+      <a href="{{ url_for('dashboard') }}" class="navtop {{ 'active' if request.endpoint in ['dashboard','pending_board','orders','order_detail','order_new','routes_list','route_plan','route_detail','resources','scan_module'] }}">Operations &#9662;</a>
+      <div class="submenu">
+        <a href="{{ url_for('dashboard') }}">Control board</a>
+        <a href="{{ url_for('pending_board') }}">Pending work board</a>
+        <a href="{{ url_for('orders') }}">Orders</a>
+        <a href="{{ url_for('order_new') }}">New job</a>
+        <a href="{{ url_for('routes_list') }}">Routes</a>
+        <a href="{{ url_for('route_plan') }}">Plan a route</a>
+        <a href="{{ url_for('resources') }}">Resources (vans &amp; drivers)</a>
+        <a href="{{ url_for('scan_module') }}">Scanner</a>
+      </div>
+    </div>
+    <div class="navgroup">
+      <a href="{{ url_for('customers') }}" class="navtop {{ 'active' if 'customer' in (request.endpoint or '') or request.endpoint in ['surcharges','rate_settings','rate_regions','rate_calculator'] }}">Customers &#9662;</a>
+      <div class="submenu">
+        <a href="{{ url_for('customers') }}">Customers</a>
+        <a href="{{ url_for('customer_edit') }}">New customer</a>
+        <a href="{{ url_for('rate_template') }}">Rate-card template (CSV)</a>
+        <a href="{{ url_for('rate_settings') }}">Standard rate card</a>
+        <a href="{{ url_for('rate_regions') }}">Regions &amp; zones</a>
+        <a href="{{ url_for('rate_calculator') }}">Rate calculator</a>
+        <a href="{{ url_for('surcharges') }}">Surcharges &amp; fuel</a>
+      </div>
+    </div>
+    <div class="navgroup">
+      <a href="{{ url_for('invoices') }}" class="navtop {{ 'active' if 'invoice' in (request.endpoint or '') }}">Billing &#9662;</a>
+      <div class="submenu">
+        <a href="{{ url_for('invoices') }}">Invoices</a>
+        <a href="{{ url_for('invoice_run') }}">Weekly invoice run</a>
+        <a href="{{ url_for('surcharges') }}">Surcharges &amp; fuel</a>
+      </div>
+    </div>
+    <div class="navgroup">
+      <a href="{{ url_for('fleet') }}" class="navtop {{ 'active' if request.endpoint=='fleet' }}">Fleet &#9662;</a>
+      <div class="submenu">
+        <a href="{{ url_for('fleet') }}">Drivers &amp; vehicles</a>
+      </div>
+    </div>
+    <div class="navgroup">
+      <a href="{{ url_for('reports') }}" class="navtop {{ 'active' if request.endpoint in ['reports','messages'] }}">Insights &#9662;</a>
+      <div class="submenu">
+        <a href="{{ url_for('reports') }}">Reports &amp; KPIs</a>
+        <a href="{{ url_for('messages') }}">Customer messages</a>
+      </div>
+    </div>
+  </nav>
+  {% else %}
+  <nav class="nav">
+    <a href="{{ url_for('driver_home') }}" class="navtop {{ 'active' if request.endpoint=='driver_home' }}">My routes</a>
+    <a href="{{ url_for('scan_module') }}" class="navtop {{ 'active' if request.endpoint=='scan_module' }}">Scanner</a>
+  </nav>
+  {% endif %}
+  <div class="who">{{ user.name }} &middot; {{ user.role }} &middot; <a href="{{ url_for('logout') }}">Sign out</a></div>
+</div>
+{% endif %}
+
+<div class="wrap {{ wrap_class or '' }}">
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</div>
+<script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% set hide_nav = true %}
+{% block title %}Sign in{% endblock %}
+{% block body %}
+<div class="auth">
+  <div class="box">
+    <div class="brand">Vo<span>ya</span></div>
+    <p class="muted small" style="text-align:center;margin-top:0">Delivery operations platform</p>
+    <form method="post">
+      <label>Email</label>
+      <input name="email" type="email" autocomplete="username" required autofocus>
+      <label>Password</label>
+      <input name="password" type="password" autocomplete="current-password" required>
+      <button class="btn block big" style="margin-top:1rem">Sign in</button>
+    </form>
+    <p class="small muted" style="margin-top:1rem;text-align:center">
+      Customer? <a href="/portal">Place an order</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

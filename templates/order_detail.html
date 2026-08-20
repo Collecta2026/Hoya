@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ o.ref }}{% endblock %}
+{% block body %}
+{% set sc, sl = sla %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>{{ o.ref }} <span class="muted" style="font-size:1rem">{{ o.job_type }}</span></h1>
+  <div class="actions">
+    {% if sl and sl!='on time' %}<span class="slatag {{ sc }}">{{ sl }}</span>{% endif %}
+    <span class="pill {{ o.status }}">{{ o.status }}</span>
+    <a class="btn ghost sm" href="{{ url_for('order_label', oid=o.id) }}">Print labels</a>
+  </div>
+</div>
+
+<div class="split">
+  <div class="card">
+    <h2>Shipment</h2>
+    <table>
+      <tr><td class="muted">Customer</td><td>{{ o.customer.name }}</td></tr>
+      <tr><td class="muted">Contact</td><td>{{ o.recipient or '—' }} · {{ o.phone or '' }}</td></tr>
+      <tr><td class="muted">Collection</td><td>{{ o.collection_address }}<br><b>{{ o.collection_postcode }}</b></td></tr>
+      <tr><td class="muted">Delivery</td><td>{{ o.delivery_address }}<br><b>{{ o.delivery_postcode }}</b></td></tr>
+      <tr><td class="muted">Collection date</td><td>{{ o.collection_date.strftime('%a %d %b') if o.collection_date else '—' }} {{ o.collection_time or '' }}</td></tr>
+      <tr><td class="muted">Delivery date</td><td>{{ o.delivery_date.strftime('%a %d %b') if o.delivery_date else '—' }} <span class="muted small">({{ o.timing }})</span></td></tr>
+      <tr><td class="muted">Service</td><td>{{ o.service }}</td></tr>
+      <tr><td class="muted">Goods</td><td>{{ o.pallet_count }} pallet(s) · {{ o.parcels }} parcel(s) · {{ '%.0f'|format(o.weight_kg or 0) }} kg</td></tr>
+      {% if o.weight_per_pallet or o.pallet_length %}<tr><td class="muted">Pallet spec</td><td>{{ '%.0f'|format(o.weight_per_pallet or 0) }} kg/pallet · {{ '%.0f'|format(o.pallet_length or 0) }}×{{ '%.0f'|format(o.pallet_width or 0) }}×{{ '%.0f'|format(o.pallet_height or 0) }} cm</td></tr>{% endif %}
+      <tr><td class="muted">Charge</td><td>£{{ '%.2f'|format(o.price or 0) }}</td></tr>
+      {% if o.notes %}<tr><td class="muted">Notes</td><td>{{ o.notes }}</td></tr>{% endif %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Allocation</h2>
+    <form method="post" action="{{ url_for('pending_allocate', oid=o.id) }}">
+      <label>Driver</label>
+      <select name="driver_id"><option value="">—</option>
+        {% for d in drivers %}<option value="{{ d.id }}" {{ 'selected' if o.assigned_driver_id==d.id }}>{{ d.user.name }} ({{ d.status }})</option>{% endfor %}</select>
+      <label>Van</label>
+      <select name="vehicle_id"><option value="">—</option>
+        {% for v in vehicles %}<option value="{{ v.id }}" {{ 'selected' if o.assigned_vehicle_id==v.id }}>{{ v.reg }} · {{ v.vtype }} · {{ v.capacity_pallets }} plt ({{ v.status }})</option>{% endfor %}</select>
+      <button class="btn block" style="margin-top:.7rem">Save allocation</button>
+    </form>
+    <form method="post" action="{{ url_for('pending_suggest', oid=o.id) }}" style="margin-top:.5rem">
+      <button class="btn ghost block">Suggest van &amp; driver</button></form>
+
+    <h2 style="margin-top:1.2rem">Surcharges</h2>
+    <form method="post" action="{{ url_for('order_apply_surcharges', oid=o.id) }}">
+      {% set applied = o.surcharges|map(attribute='id')|list %}
+      {% for s in all_surcharges %}
+      <label class="small" style="display:block"><input type="checkbox" name="surcharge_ids" value="{{ s.id }}" {{ 'checked' if s.id in applied }} style="width:auto"> {{ s.name }}</label>
+      {% endfor %}
+      <button class="btn ghost block sm" style="margin-top:.5rem">Update surcharges</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Boxes ({{ o.items|length }})</h2>
+  <table>
+    <thead><tr><th>Barcode</th><th>Type</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for i in o.items %}
+    <tr><td class="mono">{{ i.barcode }}</td><td>{{ i.kind }}</td>
+    <td><span class="pill {{ 'delivered' if i.status in ['delivered','collected','loaded'] else ('failed' if i.status=='missing' else 'pending') }}">{{ i.status }}</span></td></tr>
+    {% else %}<tr><td colspan="3" class="muted">No boxes recorded.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% if o.pod %}
+  <h2 style="margin-top:1rem">Proof</h2>
+  <div class="actions">
+    {% if o.pod.photo %}<img class="podimg" src="{{ url_for('pod_photo', pid=o.pod.id) }}">{% endif %}
+    {% if o.pod.signature %}<img class="podimg" src="{{ url_for('pod_signature', pid=o.pod.id) }}">{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

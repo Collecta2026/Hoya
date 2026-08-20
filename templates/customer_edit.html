@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% set wrap_class='narrow' %}
+{% block title %}{{ 'Edit' if c else 'New' }} customer{% endblock %}
+{% block body %}
+<h1>{{ 'Edit customer' if c else 'New customer' }}</h1>
+<div class="card">
+<form method="post">
+  <label>Company name</label><input name="name" value="{{ c.name if c else '' }}" required>
+  <div class="grid2">
+    <div><label>Contact name</label><input name="contact_name" value="{{ c.contact_name if c else '' }}"></div>
+    <div><label>Phone</label><input name="phone" value="{{ c.phone if c else '' }}"></div>
+  </div>
+  <label>Email</label><input name="email" value="{{ c.email if c else '' }}">
+  <div class="grid2">
+    <div><label>Address</label><input name="address" value="{{ c.address if c else '' }}"></div>
+    <div><label>Postcode</label><input name="postcode" value="{{ c.postcode if c else '' }}"></div>
+  </div>
+  <h2 style="margin-top:1.2rem">Pricing</h2>
+  <div class="grid2">
+    <div><label>Pricing mode</label>
+      <select name="pricing_mode">
+        <option value="flat" {{ 'selected' if c and c.pricing_mode=='flat' }}>Bespoke flat rates (below)</option>
+        <option value="standard" {{ 'selected' if c and c.pricing_mode=='standard' }}>Standard rate card (cost engine)</option>
+      </select></div>
+    <div><label>Discount off standard %</label><input name="discount_pct" type="number" step="0.1" value="{{ c.discount_pct if c else 0 }}"></div>
+  </div>
+  <p class="small muted">Standard mode prices each job from the standard rate card (fuel, mileage, driver time) less this discount. Flat mode uses the bespoke £ rates below.</p>
+  <h2 style="margin-top:1.2rem">Bespoke flat rate card</h2>
+  <p class="small muted">Carriage = base + (£/mile × distance) + (£/pallet × pallets) + (£/kg × weight), with a minimum charge. Fuel surcharge is added on top at invoicing.</p>
+  <div class="grid2">
+    <div><label>Base £ per drop</label><input name="rate_base" type="number" step="0.01" value="{{ c.rate_base if c else 0 }}"></div>
+    <div><label>£ per mile</label><input name="rate_per_mile" type="number" step="0.01" value="{{ c.rate_per_mile if c else 0 }}"></div>
+  </div>
+  <div class="grid2">
+    <div><label>£ per pallet</label><input name="rate_per_pallet" type="number" step="0.01" value="{{ c.rate_per_pallet if c else 0 }}"></div>
+    <div><label>£ per kg</label><input name="rate_per_kg" type="number" step="0.001" value="{{ c.rate_per_kg if c else 0 }}"></div>
+  </div>
+  <div class="grid2">
+    <div><label>Minimum charge £</label><input name="min_charge" type="number" step="0.01" value="{{ c.min_charge if c else 0 }}"></div>
+    <div><label>Fuel surcharge %</label><input name="fuel_surcharge_pct" type="number" step="0.1" value="{{ c.fuel_surcharge_pct if c else 15 }}"></div>
+  </div>
+  {% if c %}<p class="small muted" style="margin-top:.8rem">Portal access code: <b class="mono">{{ c.portal_code }}</b></p>{% endif %}
+  <button class="btn block big" style="margin-top:.8rem">Save customer</button>
+</form>
+</div>
+{% endblock %}

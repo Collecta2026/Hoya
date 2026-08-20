@@ -1,6 +1,7 @@
-# One-click Render deployment: a web service + a managed Postgres database.
-# Push this repo to GitHub, then in Render choose "New +" -> "Blueprint" and
-# point it at the repo. Render reads this file and provisions everything.
+# Online deployment: Render runs the web app; your database is on Neon
+# (same stack as the cashflow app). Create a Neon project (London region),
+# copy its POOLED connection string, and paste it as DATABASE_URL when Render
+# asks. Push this repo to GitHub, then in Render: "New +" -> "Blueprint".
 services:
   - type: web
     name: voya
@@ -20,9 +21,7 @@ services:
       - key: ADMIN_PASSWORD
         sync: false        # set a strong admin password in the dashboard
       - key: DATABASE_URL
-        fromDatabase:
-          name: voya-db
-          property: connectionString
+        sync: false          # paste your Neon POOLED connection string here (Render dashboard)
       # Set these three in the Render dashboard to switch SMS from log-only to live:
       - key: TWILIO_SID
         sync: false
@@ -41,9 +40,7 @@ services:
     startCommand: python backup.py
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: voya-db
-          property: connectionString
+        sync: false          # paste your Neon POOLED connection string here (Render dashboard)
       - key: BACKUP_BUCKET
         sync: false
       - key: BACKUP_ENDPOINT
@@ -52,8 +49,3 @@ services:
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
-
-databases:
-  - name: voya-db
-    plan: basic-256mb      # paid = daily backups + point-in-time recovery
-    region: frankfurt

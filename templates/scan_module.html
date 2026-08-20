@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Scanner{% endblock %}
+{% block body %}
+<div class="phone">
+  <h1>Scanner</h1>
+  <p class="muted small">Scan or type any pallet/parcel barcode or shipment reference to look it up.</p>
+  <div id="scanbox" class="card" style="display:none"><div id="reader" style="width:100%"></div>
+    <button type="button" class="btn ghost block sm" onclick="stopScan()">Stop camera</button></div>
+  <div class="inline" style="margin:.6rem 0">
+    <div style="flex:1"><label style="margin-top:0">Barcode / reference</label>
+      <input id="manualbc" placeholder="scan or type" autofocus></div>
+    <button type="button" class="btn ghost" onclick="lookup()">Look up</button>
+  </div>
+  <button type="button" class="btn teal block" onclick="startScan()">📷 Scan with camera</button>
+  <div id="result" style="margin-top:1rem"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+let html5qr=null;
+async function lookup(bc){
+  bc = bc || document.getElementById('manualbc').value.trim();
+  if(!bc) return;
+  const r=await fetch('/api/lookup?barcode='+encodeURIComponent(bc));
+  const d=await r.json();
+  const box=document.getElementById('result');
+  if(!d.found){ box.innerHTML='<div class="card"><b>'+bc+'</b> — not found on any shipment.</div>'; return; }
+  box.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">'+
+    '<h2 style="margin:0">'+d.ref+'</h2><span class="pill '+d.status+'">'+d.status+'</span></div>'+
+    '<p class="small muted" style="margin:.4rem 0">'+d.customer+' · '+d.job+(d.kind?(' · '+d.kind):'')+'</p>'+
+    '<p style="margin:.2rem 0">'+(d.delivery||'')+' <b>'+(d.delivery_pc||'')+'</b></p>'+
+    '<p class="small muted">'+d.pallets+' pallet(s) · '+d.parcels+' parcel(s) · '+(d.weight||0)+' kg</p></div>';
+  document.getElementById('manualbc').value='';
+}
+document.getElementById('manualbc').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();lookup();}});
+function startScan(){
+  document.getElementById('scanbox').style.display='block';
+  html5qr=new Html5Qrcode("reader");
+  html5qr.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:150}},
+    (txt)=>{lookup(txt);}, ()=>{}).catch(e=>{document.getElementById('result').textContent='Camera unavailable — type the code instead.';});
+}
+function stopScan(){if(html5qr){html5qr.stop().then(()=>{html5qr.clear();document.getElementById('scanbox').style.display='none';});}}
+</script>
+{% endblock %}

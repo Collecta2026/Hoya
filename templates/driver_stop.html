@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Stop {{ s.sequence }}{% endblock %}
+{% block body %}
+<div class="phone">
+  <p class="small"><a href="{{ url_for('driver_route', rid=s.route_id) }}">&larr; {{ s.route.name }}</a></p>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <h1 style="margin-bottom:.2rem">{{ s.order.recipient or s.order.customer.name }}</h1>
+      <span class="seq {{ s.status }}">{{ s.sequence }}</span>
+    </div>
+    <p class="muted" style="margin:0">{{ s.order.address or '' }}<br><b>{{ s.order.postcode }}</b></p>
+    <p class="small muted">{{ 'COLLECTION' if mode=='collect' else 'DELIVERY' }} · {{ s.order.customer.name }} · {{ s.order.ref }}
+       {% if s.order.notes %}<br>Note: {{ s.order.notes }}{% endif %}</p>
+    <div class="actions">
+      <a class="btn sm" href="https://www.google.com/maps/dir/?api=1&destination={{ (s.order.address ~ ' ' ~ s.order.postcode)|urlencode }}&travelmode=driving" target="_blank">🗺️ Google Maps</a>
+      <a class="btn sm teal" href="https://waze.com/ul?q={{ (s.order.address ~ ' ' ~ s.order.postcode)|urlencode }}&navigate=yes" target="_blank">Waze</a>
+      {% if s.order.phone %}<a class="btn ghost sm" href="tel:{{ s.order.phone }}">Call</a>{% endif %}
+    </div>
+  </div>
+
+  {% if s.order.items %}
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="margin:0">Boxes</h2>
+      <span id="scanprog" class="pill {{ 'delivered' if scanned>=total and total else 'pending' }}">{{ scanned }}/{{ total }} scanned</span>
+    </div>
+    {% if scanned>=total and total %}
+      <p class="small" style="color:var(--ok);font-weight:600;margin:.5rem 0 0">✓ All boxes scanned — {{ 'collection' if mode=='collect' else 'delivery' }} ready to confirm.</p>
+    {% else %}
+      <p class="small muted" style="margin:.5rem 0 0">Scan every box before you confirm — the app warns if any are missing.</p>
+    {% endif %}
+    <a class="btn block teal" style="margin-top:.7rem" href="{{ url_for('driver_scan', sid=s.id) }}">
+      📷 {{ 'Scan boxes to collect' if mode=='collect' else 'Scan boxes to deliver' }} ({{ scanned }}/{{ total }})</a>
+  </div>
+  {% endif %}
+
+  {% if s.status in ['delivered','collected','failed'] and s.pod %}
+  <div class="card">
+    <h2>Proof of {{ 'collection' if mode=='collect' else 'delivery' }} <span class="pill {{ s.pod.outcome }}">{{ s.pod.outcome }}</span></h2>
+    <p class="small muted">By {{ s.pod.signed_by or '—' }} · {{ s.pod.created_at.strftime('%d %b %H:%M') }} · GPS {{ s.pod.gps or 'n/a' }}</p>
+    {% if s.pod.notes %}<p>{{ s.pod.notes }}</p>{% endif %}
+    <div class="actions">
+      {% if s.pod.photo %}<img class="podimg" src="{{ url_for('pod_photo', pid=s.pod.id) }}">{% endif %}
+      {% if s.pod.signature %}<img class="podimg" src="{{ url_for('pod_signature', pid=s.pod.id) }}">{% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="card">
+    <h2>Confirm {{ 'collection' if mode=='collect' else 'delivery' }}</h2>
+    {% if warn %}
+    <div class="flash error" style="margin-bottom:.6rem">Not all boxes scanned. Scan the rest above, or tick the box below to close short.</div>
+    {% endif %}
+    <form method="post" enctype="multipart/form-data" id="podform">
+      <label>Outcome</label>
+      {% if mode=='collect' %}
+      <select name="outcome"><option value="collected">Collected</option><option value="failed">Failed / unable to collect</option></select>
+      {% else %}
+      <select name="outcome"><option value="delivered">Delivered</option><option value="failed">Failed / unable to deliver</option></select>
+      {% endif %}
+      <label>Photo (parcel / doorstep)</label>
+      <input type="file" name="photo" accept="image/*" capture="environment">
+      <label>{{ 'Collected by' if mode=='collect' else 'Received by' }} (name)</label><input name="signed_by">
+      <label>Signature</label>
+      <canvas class="sig" id="sig"></canvas>
+      <div class="small"><a href="#" onclick="clearSig();return false">Clear signature</a></div>
+      <label>Notes</label><textarea name="notes" rows="2" placeholder="Left with neighbour, etc."></textarea>
+      {% if total and scanned < total %}
+      <label class="small" style="display:flex;align-items:center;gap:.5rem;margin-top:.6rem;color:var(--bad)">
+        <input type="checkbox" name="override_missing" style="width:auto">
+        Complete with {{ total - scanned }} box(es) missing (records them as missing)
+      </label>
+      {% endif %}
+      <input type="hidden" name="signature_data" id="signature_data">
+      <input type="hidden" name="gps" id="gps">
+      <button class="btn block big" style="margin-top:.8rem" onclick="return saveSig()">
+        {{ "Save collection & next stop" if mode=="collect" else "Save POD & next stop" }}</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const cv=document.getElementById('sig');
+if(cv){
+  const ctx=cv.getContext('2d');
+  function fit(){cv.width=cv.offsetWidth;cv.height=cv.offsetHeight;ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111';}
+  fit();window.addEventListener('resize',fit);
+  let draw=false,drew=false;
+  function pos(e){const r=cv.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top};}
+  function start(e){draw=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);e.preventDefault();}
+  function move(e){if(!draw)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();drew=true;e.preventDefault();}
+  function end(){draw=false;}
+  cv.addEventListener('mousedown',start);cv.addEventListener('mousemove',move);cv.addEventListener('mouseup',end);
+  cv.addEventListener('touchstart',start);cv.addEventListener('touchmove',move);cv.addEventListener('touchend',end);
+  window.clearSig=()=>{ctx.clearRect(0,0,cv.width,cv.height);drew=false;};
+  window.saveSig=()=>{if(drew){document.getElementById('signature_data').value=cv.toDataURL('image/png');}return true;};
+}
+if(navigator.geolocation){navigator.geolocation.getCurrentPosition(p=>{
+  const g=document.getElementById('gps'); if(g) g.value=p.coords.latitude.toFixed(5)+','+p.coords.longitude.toFixed(5);
+},()=>{},{timeout:5000});}
+</script>
+{% endblock %}

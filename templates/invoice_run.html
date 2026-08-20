@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% set wrap_class='narrow' %}
+{% block title %}Invoice run{% endblock %}
+{% block body %}
+<h1>Weekly invoice run</h1>
+<div class="card">
+<p class="muted small">Generates one invoice per customer from their completed, un-invoiced shipments in the chosen week, using each customer's rate card plus any applied surcharges and their fuel surcharge. Leave the date blank to bill last week (Mon–Sun).</p>
+<form method="post">
+  <label>Week starting (Monday)</label>
+  <input name="period_start" type="date">
+  <label style="margin-top:1rem">Customers</label>
+  <p class="small muted">Leave all unticked to run every customer.</p>
+  <div style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:9px;padding:.5rem">
+    {% for c in customers %}
+    <label class="small" style="display:block;margin:.2rem 0"><input type="checkbox" name="customer_ids" value="{{ c.id }}" style="width:auto"> {{ c.name }}</label>
+    {% endfor %}
+  </div>
+  <button class="btn block big" style="margin-top:1rem">Generate invoices</button>
+</form>
+</div>
+{% endblock %}

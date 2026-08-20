@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ r.ref }}{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>{{ r.name }} <span class="mono muted" style="font-size:1rem">{{ r.ref }}</span></h1>
+  <span class="pill {{ r.status }}">{{ r.status }}</span>
+</div>
+
+<div class="split">
+  <div class="card">
+    <h2>Stops <span class="muted small">{{ r.stops|length }} · depot {{ r.start_postcode }}</span>
+      <form method="post" action="{{ url_for('route_optimise', rid=r.id) }}" style="margin:0">
+        <button class="btn sm teal">Re-optimise</button></form>
+    </h2>
+    {% for s in r.stops %}
+    <div class="stopline {{ s.status }}">
+      <div class="seq">{{ s.sequence }}</div>
+      <div class="stopmeta">
+        <b>{{ s.order.recipient or s.order.customer.name }}</b>
+        <span class="small muted">{{ s.order.customer.name }} · {{ s.order.postcode }} · {{ s.order.pallets }} plt · {{ s.order.ref }}</span>
+      </div>
+      <span class="pill {{ s.status }}">{{ s.status }}</span>
+      {% if s.pod %}<a class="small" href="{{ url_for('driver_stop', sid=s.id) }}">POD</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h2>Assign & dispatch</h2>
+    <form method="post" action="{{ url_for('route_assign', rid=r.id) }}">
+      <label>Driver</label>
+      <select name="driver_id"><option value="">—</option>
+        {% for d in drivers %}<option value="{{ d.id }}" {{ 'selected' if r.driver_id==d.id }}>{{ d.user.name }}</option>{% endfor %}</select>
+      <label>Vehicle</label>
+      <select name="vehicle_id"><option value="">—</option>
+        {% for v in vehicles %}<option value="{{ v.id }}" {{ 'selected' if r.vehicle_id==v.id }}>{{ v.reg }} ({{ v.vtype }})</option>{% endfor %}</select>
+      <button class="btn ghost block" style="margin-top:.8rem">Save assignment</button>
+    </form>
+    <hr style="border:none;border-top:1px solid var(--line);margin:1.1rem 0">
+    {% if r.status == 'planned' %}
+    <form method="post" action="{{ url_for('route_dispatch', rid=r.id) }}">
+      <button class="btn block big">Dispatch route & text customers</button>
+      <p class="small muted">Marks every order out for delivery and sends each recipient an "on its way" text.</p>
+    </form>
+    {% else %}
+    <p class="muted small">This route is <b>{{ r.status }}</b>. Drivers can now capture POD from their app.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

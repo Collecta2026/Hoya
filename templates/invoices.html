@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Invoices{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>Invoices</h1><a class="btn" href="{{ url_for('invoice_run') }}">Run weekly invoices</a>
+</div>
+<div class="card">
+<table>
+  <thead><tr><th>Invoice</th><th>Customer</th><th>Period</th><th>Shipments</th><th>Total (inc VAT)</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for i in invoices %}
+    <tr>
+      <td class="mono">{{ i.ref }}</td>
+      <td>{{ i.customer.name }}</td>
+      <td class="small">{{ i.period_start.strftime('%d %b') }}–{{ i.period_end.strftime('%d %b') }}</td>
+      <td>{{ i.lines|length }}</td>
+      <td>£{{ '%.2f'|format(i.total) }}</td>
+      <td><span class="pill {{ 'delivered' if i.status=='paid' else ('out' if i.status=='sent' else 'pending') }}">{{ i.status }}</span></td>
+      <td><a class="btn sm ghost" href="{{ url_for('invoice_detail', iid=i.id) }}">Open</a></td>
+    </tr>
+  {% else %}<tr><td colspan="7" class="muted">No invoices yet. Run the weekly invoices to generate them.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

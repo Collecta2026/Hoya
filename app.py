@@ -1,1132 +1,1593 @@
-"""
-Hoya - courier dispatch & last-mile delivery ops platform.
-Flask + SQLAlchemy, same architecture as Collecta: SQLite locally,
-Postgres (Neon) in production via the DATABASE_URL env var.
+"""HelioOps — Heliolink delivery operations platform.
 
-Run locally:
-    pip install -r requirements.txt
-    python app.py
-Then open http://localhost:5000  (seeded admin login printed on first run).
+A single deployable Flask app covering:
+  - dispatcher control board       - multi-driver & vehicle management
+  - order management & import      - customer self-order portal + tracking
+  - route planning & optimisation  - driver PWA (route, POD, imaging)
+  - customer-specific rates        - automated customer SMS
+  - reporting
+
+Runs on SQLite locally (no setup) and Postgres on Render (set DATABASE_URL).
 """
 import os
 import io
-import csv
-import random
-import string
-from datetime import datetime, date, timedelta
+import base64
+import secrets
+from datetime import date, datetime
+from functools import wraps
 
-from flask import (Flask, render_template, redirect, url_for, request, flash,
-                    jsonify, Response, abort)
-from flask_login import (LoginManager, login_user, logout_user, login_required,
-                          current_user)
+from flask import (Flask, render_template, request, redirect, url_for,
+                   session, flash, abort, send_file, jsonify)
+from jinja2 import ChoiceLoader, FileSystemLoader
 
-from models import (db, User, Driver, Vehicle, Customer, Order, OrderBox,
-                     OrderEvent, ProofOfDelivery, Zone, RateSettings,
-                     Surcharge, OrderSurcharge, Invoice)
-from optimise import optimise_stops, region_of
-from rates import cost_breakdown, quote_order
+from models import (db, User, Driver, Vehicle, Customer, Route, Order,
+                    Stop, POD, SmsLog, Item, Scan, Surcharge, Invoice,
+                    InvoiceLine, RateSettings, Zone)
+from optimise import (optimise_sequence, geocode, haversine, DEPOT_DEFAULT,
+                      region_of, REGIONS)
+from sms import send_sms
 
-try:
-    from sms import send_sms
-except Exception:  # pragma: no cover - sms module always present, but be defensive
-    def send_sms(*a, **k):
-        print("[sms] skipped:", a, k)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSET_EXT = (".css", ".js", ".json", ".svg", ".png", ".ico",
+             ".webmanifest", ".jpg", ".jpeg", ".gif", ".txt")
 
 
-# ---------------------------------------------------------------------------
-# App factory / config
-# ---------------------------------------------------------------------------
-
-def create_app():
-    app = Flask(__name__)
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-
-    db_url = os.environ.get("DATABASE_URL", "")
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
-    if not db_url:
-        db_url = "sqlite:///" + os.path.join(os.path.dirname(__file__), "hoya.db")
-    app.config["SQLALCHEMY_DATABASE_URI"] = db_url
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
-    app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024  # 12MB, allows POD photos
-
-    db.init_app(app)
-
-    login_manager = LoginManager()
-    login_manager.login_view = "login"
-    login_manager.init_app(app)
-
-    @login_manager.user_loader
-    def load_user(user_id):
-        return User.query.get(int(user_id))
-
-    register_routes(app)
-
-    with app.app_context():
-        db.create_all()
-        seed_if_needed()
-
-    return app
-
-
-DEPOT_POSTCODE = os.environ.get("DEPOT_POSTCODE", "M1 1AA")
-
-
-# ---------------------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------------------
-
-def gen_reference():
-    return "HOY-" + datetime.utcnow().strftime("%y%m%d") + "-" + "".join(
-        random.choices(string.ascii_uppercase + string.digits, k=4))
-
-
-def gen_barcode(order_ref, kind, index):
-    prefix = "PAL" if kind == "pallet" else "PCL"
-    return f"{order_ref}-{prefix}{index:02d}"
-
-
-def log_event(order, status, note=None):
-    db.session.add(OrderEvent(order_id=order.id, status=status, note=note))
-
-
-def require_role(*roles):
-    if not current_user.is_authenticated or current_user.role not in roles:
-        abort(403)
-
-
-def sla_tag(order):
-    """amber if <=4h to the delivery deadline, red if overdue, else None."""
-    if not order.delivery_date or order.status in ("delivered", "failed", "returned", "collected"):
+def find_asset(filename):
+    """Locate a static asset in static/ or (if uploads got flattened) the
+    repo root. Extension-whitelisted so source files are never served."""
+    if not filename.lower().endswith(ASSET_EXT):
         return None
-    deadline = datetime.combine(order.delivery_date, datetime.min.time()) + timedelta(hours=18)
-    remaining = deadline - datetime.utcnow()
-    if remaining.total_seconds() < 0:
-        return "red"
-    if remaining.total_seconds() < 4 * 3600:
-        return "amber"
+    for base in (os.path.join(BASE_DIR, "static"), BASE_DIR):
+        full = os.path.normpath(os.path.join(base, filename))
+        if full.startswith(BASE_DIR) and os.path.isfile(full):
+            return full
     return None
 
 
+def create_app():
+    app = Flask(__name__, static_folder=None)
+    # Resolve templates from templates/ first, then the repo root. This keeps
+    # the app working even if a GitHub folder upload flattened the files.
+    app.jinja_loader = ChoiceLoader([
+        FileSystemLoader(os.path.join(BASE_DIR, "templates")),
+        FileSystemLoader(BASE_DIR),
+    ])
+    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
+
+    db_url = os.environ.get("DATABASE_URL", "sqlite:///helioops.db")
+    # Render/Heroku hand out postgres:// which SQLAlchemy wants as postgresql://
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    app.config["SQLALCHEMY_DATABASE_URI"] = db_url
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024  # 12MB uploads
+
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
+        seed_if_empty()
+
+    register_routes(app)
+    return app
+
+
+# --------------------------------------------------------------------------
+#  Auth helpers
+# --------------------------------------------------------------------------
+def current_user():
+    uid = session.get("uid")
+    return db.session.get(User, uid) if uid else None
+
+
+def login_required(*roles):
+    def deco(fn):
+        @wraps(fn)
+        def wrap(*a, **kw):
+            u = current_user()
+            if not u:
+                return redirect(url_for("login", next=request.path))
+            if roles and u.role not in roles:
+                abort(403)
+            return fn(*a, **kw)
+        return wrap
+    return deco
+
+
+def next_ref(prefix, model, field):
+    n = db.session.query(model).count() + 1
+    ref = f"{prefix}{n:05d}"
+    while db.session.query(model).filter(getattr(model, field) == ref).first():
+        n += 1
+        ref = f"{prefix}{n:05d}"
+    return ref
+
+
+# --------------------------------------------------------------------------
+#  Rates
+# --------------------------------------------------------------------------
+DEPOT_ADDRESS = "Heliolink Ltd, Ashton-on-Ribble"
+DEPOT_POSTCODE = "PR2 2TE"
+LITRES_PER_GALLON = 4.54609
+
+
+def get_settings():
+    s = db.session.get(RateSettings, 1)
+    if not s:
+        s = RateSettings(id=1)
+        db.session.add(s)
+        db.session.commit()
+    return s
+
+
+def zone_multiplier(postcode):
+    z = Zone.query.filter_by(region=region_of(postcode)).first()
+    return z.multiplier if z else 1.0
+
+
+def mpg_for(vtype, settings):
+    return {"panel van": settings.mpg_panel, "2.5t": settings.mpg_25t,
+            "7.5t": settings.mpg_75t}.get(vtype, settings.mpg_panel)
+
+
+def vtype_for_pallets(n):
+    if n <= 2:
+        return "panel van"
+    if n <= 4:
+        return "2.5t"
+    return "7.5t"
+
+
+def recommend_rate(postcode, pallets, weight_per_pallet=0, service="48",
+                   vtype=None, settings=None):
+    """Cost-based standard rate. Returns a full breakdown dict."""
+    s = settings or get_settings()
+    n = max(int(pallets or 0), 1)
+    vtype = vtype or vtype_for_pallets(n)
+    a = geocode(DEPOT_POSTCODE) or DEPOT_DEFAULT
+    b = geocode(postcode) or a
+    one_way = haversine(a, b)
+    miles = one_way * (2 if s.round_trip else 1)
+
+    mpg = mpg_for(vtype, s) or 25.0
+    litres = (miles / mpg) * LITRES_PER_GALLON if mpg else 0
+    fuel_cost = litres * (s.fuel_price_per_litre or 0)
+
+    drive_hours = miles / (s.avg_speed_mph or 40)
+    handling_hours = n * (s.handling_min_per_pallet or 0) / 60.0
+    labour_hours = drive_hours + handling_hours
+    driver_cost = labour_hours * (s.driver_rate_per_hour or 0)
+
+    base_cost = fuel_cost + driver_cost + (s.fixed_cost_per_job or 0)
+    zmult = zone_multiplier(postcode)
+    cost = base_cost * zmult
+    if str(service) == "24":
+        cost *= (1 + (s.service_uplift_24h_pct or 0) / 100.0)
+    recommended = cost * (1 + (s.margin_pct or 0) / 100.0)
+
+    return {
+        "vtype": vtype, "region": region_of(postcode),
+        "one_way_miles": round(one_way, 1), "miles": round(miles, 1),
+        "mpg": mpg, "litres": round(litres, 1), "fuel_cost": round(fuel_cost, 2),
+        "drive_hours": round(drive_hours, 2), "handling_hours": round(handling_hours, 2),
+        "driver_cost": round(driver_cost, 2), "fixed": round(s.fixed_cost_per_job or 0, 2),
+        "zone_mult": zmult, "service": str(service),
+        "cost": round(cost, 2), "margin_pct": s.margin_pct,
+        "recommended": round(recommended, 2),
+        "weight_per_pallet": weight_per_pallet, "total_weight": n * (weight_per_pallet or 0),
+    }
+
+
+def quote_order(customer, postcode, pallets, weight=0, start="PR2 2TE"):
+    """Carriage price. Standard-mode customers use the cost engine (less their
+    discount); flat-mode customers use their bespoke £ rate card."""
+    if not customer:
+        return 0.0
+    if (customer.pricing_mode or "flat") == "standard":
+        rec = recommend_rate(postcode, pallets,
+                             (weight or 0) / max(int(pallets or 1), 1))["recommended"]
+        price = rec * (1 - (customer.discount_pct or 0) / 100.0)
+        return round(max(price, customer.min_charge or 0), 2)
+    a = geocode(start) or DEPOT_DEFAULT
+    b = geocode(postcode) or a
+    miles = haversine(a, b)
+    price = (customer.rate_base or 0) \
+        + (customer.rate_per_mile or 0) * miles \
+        + (customer.rate_per_pallet or 0) * (pallets or 0) \
+        + (customer.rate_per_kg or 0) * (weight or 0)
+    price = max(price, customer.min_charge or 0)
+    return round(price, 2)
+
+
+def set_legs(order, customer, job, addr, pc):
+    """Populate collection + delivery legs. The non-entered leg is the depot."""
+    if job == "collection":
+        order.collection_address = addr
+        order.collection_postcode = pc
+        order.delivery_address = DEPOT_ADDRESS
+        order.delivery_postcode = DEPOT_POSTCODE
+    else:
+        order.collection_address = DEPOT_ADDRESS
+        order.collection_postcode = DEPOT_POSTCODE
+        order.delivery_address = addr
+        order.delivery_postcode = pc
+
+
+def order_surcharge_total(order, carriage):
+    """Sum of applied accessorial surcharges (excludes fuel)."""
+    total = 0.0
+    detail = []
+    for s in order.surcharges:
+        amt = s.compute(carriage, order.pallets)
+        total += amt
+        detail.append(f"{s.name} £{amt:.2f}")
+    return round(total, 2), "; ".join(detail)
+
+
+def ship_date(order):
+    if order.stop and order.stop.completed_at:
+        return order.stop.completed_at.date()
+    return order.created_at.date()
+
+
+def generate_invoice(customer, start, end):
+    """Build a weekly invoice for one customer from its completed, un-invoiced
+    shipments in the period. Returns the Invoice, or None if nothing to bill."""
+    orders = [o for o in customer.orders
+              if o.status in ("delivered", "collected")
+              and o.invoice_id is None
+              and start <= ship_date(o) <= end]
+    if not orders:
+        return None
+
+    inv = Invoice(ref=next_ref("INV", Invoice, "ref"), customer=customer,
+                  period_start=start, period_end=end, issue_date=date.today(),
+                  fuel_surcharge_pct=customer.fuel_surcharge_pct or 0)
+    db.session.add(inv)
+    db.session.flush()
+
+    carriage_sum = surcharge_sum = 0.0
+    for o in sorted(orders, key=ship_date):
+        carriage = o.price or 0.0
+        sur_amt, sur_detail = order_surcharge_total(o, carriage)
+        line = InvoiceLine(
+            invoice=inv, order_ref=o.ref, ship_date=ship_date(o),
+            collection=o.collection_address, collection_pc=o.collection_postcode,
+            delivery=o.delivery_address, delivery_pc=o.delivery_postcode,
+            pallets=o.pallet_count, weight_kg=o.weight_kg,
+            carriage=carriage, surcharge_detail=sur_detail,
+            surcharge_amount=sur_amt, line_total=round(carriage + sur_amt, 2),
+            pod_ref=(o.ref if o.pod and o.pod.photo else None))
+        db.session.add(line)
+        o.invoice_id = inv.id
+        carriage_sum += carriage
+        surcharge_sum += sur_amt
+
+    fuel = round(carriage_sum * (inv.fuel_surcharge_pct or 0) / 100.0, 2)
+    subtotal = round(carriage_sum + surcharge_sum + fuel, 2)
+    vat = round(subtotal * 0.20, 2)
+    inv.carriage = round(carriage_sum, 2)
+    inv.surcharge_total = round(surcharge_sum, 2)
+    inv.fuel_surcharge = fuel
+    inv.subtotal = subtotal
+    inv.vat = vat
+    inv.total = round(subtotal + vat, 2)
+    return inv
+
+
+def build_items(order, parcels, pallets, barcodes=None):
+    """Create scannable Item rows for an order. Auto-generates barcodes
+    (e.g. HL00007-P1, HL00007-L1) unless explicit barcodes are supplied."""
+    barcodes = barcodes or []
+    bc = iter(barcodes)
+    for n in range(1, int(parcels or 0) + 1):
+        code = next(bc, None) or f"{order.ref}-P{n}"
+        db.session.add(Item(order=order, barcode=code, kind="parcel"))
+    for n in range(1, int(pallets or 0) + 1):
+        code = next(bc, None) or f"{order.ref}-L{n}"
+        db.session.add(Item(order=order, barcode=code, kind="pallet"))
+
+
+# --------------------------------------------------------------------------
+#  Scheduling / SLA helpers
+# --------------------------------------------------------------------------
+from datetime import time as dtime, timedelta
+try:
+    from zoneinfo import ZoneInfo
+    UK = ZoneInfo("Europe/London")
+except Exception:
+    UK = None
+
+VAN_SIZES = ["panel van", "2.5t", "7.5t"]
+
+
+def uk_now():
+    return datetime.now(UK).replace(tzinfo=None) if UK else datetime.now()
+
+
+def apply_scheduling(o, form):
+    """Read collection/delivery scheduling from a form onto an order."""
+    cd = form.get("collection_date")
+    dd = form.get("delivery_date")
+    timing = form.get("timing", "booked")
+    today = uk_now().date()
+    o.collection_date = datetime.strptime(cd, "%Y-%m-%d").date() if cd else today
+    o.collection_time = form.get("collection_time") or None
+    o.timing = timing
+    if dd:
+        o.delivery_date = datetime.strptime(dd, "%Y-%m-%d").date()
+    elif timing == "same-day":
+        o.delivery_date = o.collection_date
+    elif timing == "48h":
+        o.delivery_date = o.collection_date + timedelta(days=2)
+    else:
+        o.delivery_date = o.collection_date
+
+
+def same_day_cutoff_warning(o):
+    if o.timing == "same-day" and o.collection_date == uk_now().date() \
+            and uk_now().hour >= 11:
+        return "Past the 11:00 same-day cut-off — booked for next available."
+    return None
+
+
+def sla_for(o):
+    """(css_class, label) for the SLA countdown: amber within 4h, red overdue."""
+    if o.status in ("delivered", "collected", "failed"):
+        return "", "done"
+    if o.job_type == "collection":
+        d = o.collection_date or o.created_at.date()
+        t = o.collection_time or "17:00"
+    else:
+        d = o.delivery_date or o.collection_date or o.created_at.date()
+        t = "17:00"
+    try:
+        hh, mm = [int(x) for x in t.split(":")]
+    except Exception:
+        hh, mm = 17, 0
+    deadline = datetime.combine(d, dtime(hh, mm))
+    now = uk_now()
+    if now > deadline:
+        return "sla-red", "overdue"
+    if (deadline - now) <= timedelta(hours=4):
+        return "sla-amber", "due soon"
+    return "", "on time"
+
+
+# --------------------------------------------------------------------------
+#  Routes
+# --------------------------------------------------------------------------
 def register_routes(app):
 
-    # -----------------------------------------------------------------
-    # Auth
-    # -----------------------------------------------------------------
+    @app.context_processor
+    def inject():
+        return {"user": current_user(), "today": date.today()}
 
-    @app.route("/")
-    def index():
-        if current_user.is_authenticated:
-            if current_user.role == "driver":
-                return redirect(url_for("driver_home"))
-            if current_user.role == "customer":
-                return redirect(url_for("portal_home"))
-            return redirect(url_for("dashboard"))
-        return redirect(url_for("login"))
-
+    # ---- auth ----
     @app.route("/login", methods=["GET", "POST"])
     def login():
         if request.method == "POST":
-            email = request.form.get("email", "").strip().lower()
-            password = request.form.get("password", "")
-            user = User.query.filter_by(email=email).first()
-            if user and user.role in ("admin", "dispatcher") and user.check_password(password):
-                login_user(user)
-                return redirect(url_for("dashboard"))
-            flash("Invalid email or password.", "error")
+            u = User.query.filter_by(email=request.form["email"].strip().lower()).first()
+            if u and u.active and u.check_password(request.form["password"]):
+                session["uid"] = u.id
+                dest = request.args.get("next") or url_for("home")
+                return redirect(dest)
+            flash("Email or password not recognised.", "error")
         return render_template("login.html")
 
-    @app.route("/driver/login", methods=["GET", "POST"])
-    def driver_login():
-        if request.method == "POST":
-            driver_id = request.form.get("driver_id")
-            pin = request.form.get("pin", "")
-            driver = Driver.query.get(driver_id) if driver_id else None
-            if driver and driver.pin == pin:
-                user = User.query.filter_by(driver_id=driver.id).first()
-                if not user:
-                    user = User(email=f"driver{driver.id}@hoya.local", name=driver.name,
-                                 role="driver", driver_id=driver.id)
-                    user.set_password(pin)
-                    db.session.add(user)
-                    db.session.commit()
-                login_user(user)
-                return redirect(url_for("driver_home"))
-            flash("Incorrect PIN.", "error")
-        drivers = Driver.query.order_by(Driver.name).all()
-        return render_template("driver_login.html", drivers=drivers)
-
-    @app.route("/portal/login", methods=["GET", "POST"])
-    def portal_login():
-        if request.method == "POST":
-            email = request.form.get("email", "").strip().lower()
-            password = request.form.get("password", "")
-            user = User.query.filter_by(email=email, role="customer").first()
-            if user and user.check_password(password):
-                login_user(user)
-                return redirect(url_for("portal_home"))
-            flash("Invalid email or password.", "error")
-        return render_template("portal_login.html")
-
     @app.route("/logout")
-    @login_required
     def logout():
-        logout_user()
+        session.clear()
         return redirect(url_for("login"))
 
-    @app.route("/healthz")
-    def healthz():
-        return jsonify({"ok": True, "time": datetime.utcnow().isoformat()})
+    @app.route("/")
+    def home():
+        u = current_user()
+        if not u:
+            return redirect(url_for("login"))
+        if u.role == "driver":
+            return redirect(url_for("driver_home"))
+        return redirect(url_for("dashboard"))
 
-    # -----------------------------------------------------------------
-    # Dispatcher: dashboard
-    # -----------------------------------------------------------------
-
+    # ---- dispatcher control board ----
     @app.route("/dashboard")
-    @login_required
+    @login_required("admin", "dispatcher")
     def dashboard():
-        require_role("admin", "dispatcher")
         today = date.today()
-        active_statuses = ["pending", "assigned", "picked_up", "in_transit"]
-        active_count = Order.query.filter(Order.status.in_(active_statuses)).count()
-        delivered_today = Order.query.filter(
-            Order.status.in_(["delivered", "collected"]),
-            Order.updated_at >= datetime.combine(today, datetime.min.time())
-        ).count()
-        failed_count = Order.query.filter_by(status="failed").count()
-        available_drivers = Driver.query.filter_by(status="available").count()
-        available_vans = Vehicle.query.filter_by(status="available").count()
-        recent = Order.query.order_by(Order.created_at.desc()).limit(8).all()
-        return render_template("dashboard.html", active_count=active_count,
-                                delivered_today=delivered_today, failed_count=failed_count,
-                                available_drivers=available_drivers, available_vans=available_vans,
-                                recent=recent)
+        routes = Route.query.filter_by(run_date=today).all()
+        unassigned = Order.query.filter_by(status="unassigned").all()
+        counts = {
+            "unassigned": Order.query.filter_by(status="unassigned").count(),
+            "out": Order.query.filter_by(status="out").count(),
+            "delivered": Order.query.filter(Order.status == "delivered",
+                                             db.func.date(Order.created_at) == today).count(),
+            "failed": Order.query.filter_by(status="failed").count(),
+        }
+        return render_template("dashboard.html", routes=routes,
+                               unassigned=unassigned, counts=counts)
 
-    # -----------------------------------------------------------------
-    # Dispatcher: orders / dispatch board
-    # -----------------------------------------------------------------
-
-    STATUSES = ["pending", "assigned", "picked_up", "in_transit", "delivered", "collected", "failed", "returned"]
-    STATUS_LABELS = {
-        "pending": "Pending", "assigned": "Assigned", "picked_up": "Picked Up",
-        "in_transit": "In Transit", "delivered": "Delivered", "collected": "Collected",
-        "failed": "Failed / Exception", "returned": "Returned",
-    }
-
+    # ---- orders ----
     @app.route("/orders")
-    @login_required
-    def orders_board():
-        require_role("admin", "dispatcher")
-        board_statuses = ["pending", "assigned", "picked_up", "in_transit", "delivered", "failed"]
-        orders = Order.query.order_by(Order.created_at.desc()).all()
-        columns = {s: [o for o in orders if o.status == s] for s in board_statuses}
-        return render_template("orders_board.html", columns=columns,
-                                status_labels=STATUS_LABELS, board_statuses=board_statuses)
+    @login_required("admin", "dispatcher")
+    def orders():
+        status = request.args.get("status")
+        q = Order.query.order_by(Order.created_at.desc())
+        if status:
+            q = q.filter_by(status=status)
+        return render_template("orders.html", orders=q.all(), status=status)
 
     @app.route("/orders/new", methods=["GET", "POST"])
-    @login_required
+    @login_required("admin", "dispatcher")
     def order_new():
-        require_role("admin", "dispatcher")
-        customers = Customer.query.order_by(Customer.name).all()
+        customers = Customer.query.filter_by(active=True).order_by(Customer.name).all()
         if request.method == "POST":
-            order = _create_order_from_form(request.form)
-            flash(f"Order {order.reference} created.", "success")
-            return redirect(url_for("order_detail", order_id=order.id))
-        return render_template("order_form.html", customers=customers, today=date.today().isoformat())
-
-    def _create_order_from_form(form):
-        pallets = int(form.get("pallets") or 0)
-        order = Order(
-            reference=gen_reference(),
-            customer_id=int(form["customer_id"]),
-            job_type=form.get("job_type", "delivery"),
-            collection_address=form.get("collection_address"),
-            collection_postcode=(form.get("collection_postcode") or "").upper(),
-            delivery_address=form["delivery_address"],
-            delivery_postcode=form["delivery_postcode"].upper(),
-            contact_name=form.get("contact_name"),
-            contact_phone=form.get("contact_phone"),
-            notes=form.get("notes"),
-            pallets=pallets,
-            parcels=int(form.get("parcels") or 0),
-            weight_per_pallet_kg=float(form.get("weight_per_pallet_kg") or 0),
-            pallet_length_cm=float(form.get("pallet_length_cm") or 120),
-            pallet_width_cm=float(form.get("pallet_width_cm") or 100),
-            pallet_height_cm=float(form.get("pallet_height_cm") or 150),
-            collection_date=_parse_date(form.get("collection_date")),
-            collection_time=form.get("collection_time"),
-            delivery_date=_parse_date(form.get("delivery_date")),
-            timing=form.get("timing", "48h"),
-            priority=form.get("priority", "standard"),
-        )
-        db.session.add(order)
-        db.session.flush()
-        log_event(order, "pending", "Order created")
-
-        parcel_count = order.parcels or 0
-        pallet_count = order.pallets or 0
-        for i in range(1, pallet_count + 1):
-            db.session.add(OrderBox(order_id=order.id, kind="pallet", label_index=i,
-                                     barcode=gen_barcode(order.reference, "pallet", i)))
-        for i in range(1, parcel_count + 1):
-            db.session.add(OrderBox(order_id=order.id, kind="parcel", label_index=i,
-                                     barcode=gen_barcode(order.reference, "parcel", i)))
-
-        customer = Customer.query.get(order.customer_id)
-        settings = RateSettings.query.first()
-        zones = Zone.query.all()
-        try:
-            order.quoted_price = quote_order(order, customer, settings, zones, DEPOT_POSTCODE)
-        except Exception:
-            order.quoted_price = None
-
-        db.session.commit()
-        return order
-
-    def _parse_date(value):
-        if not value:
-            return None
-        try:
-            return datetime.strptime(value, "%Y-%m-%d").date()
-        except ValueError:
-            return None
-
-    @app.route("/orders/<int:order_id>")
-    @login_required
-    def order_detail(order_id):
-        require_role("admin", "dispatcher")
-        order = Order.query.get_or_404(order_id)
-        surcharges = Surcharge.query.all()
-        drivers = Driver.query.order_by(Driver.name).all()
-        vehicles = Vehicle.query.order_by(Vehicle.registration).all()
-        return render_template("order_detail.html", order=order, surcharges=surcharges,
-                                status_labels=STATUS_LABELS, statuses=STATUSES,
-                                drivers=drivers, vehicles=vehicles)
-
-    @app.route("/orders/<int:order_id>/status", methods=["POST"])
-    @login_required
-    def order_set_status(order_id):
-        require_role("admin", "dispatcher")
-        order = Order.query.get_or_404(order_id)
-        status = request.form.get("status")
-        if status not in STATUSES:
-            abort(400)
-        order.status = status
-        log_event(order, status, request.form.get("note"))
-        db.session.commit()
-        send_sms(order.contact_phone, f"Your order {order.reference} is now {STATUS_LABELS.get(status, status)}.")
-        return redirect(request.referrer or url_for("orders_board"))
-
-    @app.route("/orders/<int:order_id>/assign", methods=["POST"])
-    @login_required
-    def order_assign(order_id):
-        require_role("admin", "dispatcher")
-        order = Order.query.get_or_404(order_id)
-        driver_id = request.form.get("driver_id") or None
-        vehicle_id = request.form.get("vehicle_id") or None
-        order.driver_id = int(driver_id) if driver_id else None
-        order.vehicle_id = int(vehicle_id) if vehicle_id else None
-        if order.driver_id and order.status == "pending":
-            order.status = "assigned"
-        driver_name = Driver.query.get(order.driver_id).name if order.driver_id else "nobody"
-        log_event(order, order.status, f"Assigned to {driver_name}")
-        db.session.commit()
-        return redirect(request.referrer or url_for("orders_board"))
-
-    @app.route("/orders/<int:order_id>/surcharge", methods=["POST"])
-    @login_required
-    def order_add_surcharge(order_id):
-        require_role("admin", "dispatcher")
-        order = Order.query.get_or_404(order_id)
-        surcharge_id = int(request.form["surcharge_id"])
-        surcharge = Surcharge.query.get_or_404(surcharge_id)
-        amount = surcharge.default_amount
-        if surcharge.is_percent and order.quoted_price:
-            amount = round(order.quoted_price * surcharge.default_amount / 100.0, 2)
-        db.session.add(OrderSurcharge(order_id=order.id, surcharge_id=surcharge.id, amount=amount))
-        db.session.commit()
-        return redirect(url_for("order_detail", order_id=order.id))
-
-    @app.route("/orders/<int:order_id>/label")
-    @login_required
-    def order_label(order_id):
-        require_role("admin", "dispatcher")
-        order = Order.query.get_or_404(order_id)
-        return render_template("labels.html", order=order)
-
-    # -----------------------------------------------------------------
-    # Dispatcher: fleet (drivers & vehicles)
-    # -----------------------------------------------------------------
-
-    @app.route("/fleet")
-    @login_required
-    def fleet():
-        require_role("admin", "dispatcher")
-        drivers = Driver.query.order_by(Driver.name).all()
-        vehicles = Vehicle.query.order_by(Vehicle.registration).all()
-        return render_template("fleet.html", drivers=drivers, vehicles=vehicles)
-
-    @app.route("/fleet/drivers/new", methods=["POST"])
-    @login_required
-    def driver_new():
-        require_role("admin", "dispatcher")
-        d = Driver(name=request.form["name"], phone=request.form.get("phone"),
-                    pin=request.form.get("pin") or "1234")
-        db.session.add(d)
-        db.session.commit()
-        flash(f"Driver {d.name} added. PIN: {d.pin}", "success")
-        return redirect(url_for("fleet"))
-
-    @app.route("/fleet/drivers/<int:driver_id>/status", methods=["POST"])
-    @login_required
-    def driver_set_status(driver_id):
-        require_role("admin", "dispatcher")
-        d = Driver.query.get_or_404(driver_id)
-        d.status = request.form["status"]
-        db.session.commit()
-        return redirect(request.referrer or url_for("fleet"))
-
-    @app.route("/fleet/vehicles/new", methods=["POST"])
-    @login_required
-    def vehicle_new():
-        require_role("admin", "dispatcher")
-        size = request.form.get("size", "panel_van")
-        v = Vehicle(registration=request.form["registration"], size=size,
-                    capacity_pallets=Vehicle.SIZE_CAPACITY.get(size, 4),
-                    mpg=Vehicle.SIZE_MPG_DEFAULT.get(size, 25.0))
-        db.session.add(v)
-        db.session.commit()
-        flash(f"Vehicle {v.registration} added.", "success")
-        return redirect(url_for("fleet"))
-
-    @app.route("/fleet/vehicles/<int:vehicle_id>/status", methods=["POST"])
-    @login_required
-    def vehicle_set_status(vehicle_id):
-        require_role("admin", "dispatcher")
-        v = Vehicle.query.get_or_404(vehicle_id)
-        v.status = request.form["status"]
-        db.session.commit()
-        return redirect(request.referrer or url_for("fleet"))
-
-    # Backward/alt naming used by the resources page toggles
-    @app.route("/resources")
-    @login_required
-    def resources():
-        require_role("admin", "dispatcher")
-        drivers = Driver.query.order_by(Driver.name).all()
-        vehicles = Vehicle.query.order_by(Vehicle.registration).all()
-        return render_template("resources.html", drivers=drivers, vehicles=vehicles)
-
-    # -----------------------------------------------------------------
-    # Dispatcher: customers
-    # -----------------------------------------------------------------
-
-    @app.route("/customers")
-    @login_required
-    def customers_list():
-        require_role("admin", "dispatcher")
-        customers = Customer.query.order_by(Customer.name).all()
-        zones = Zone.query.all()
-        return render_template("customers.html", customers=customers, zones=zones)
-
-    @app.route("/customers/new", methods=["POST"])
-    @login_required
-    def customer_new():
-        require_role("admin", "dispatcher")
-        c = Customer(
-            name=request.form["name"], email=request.form.get("email"),
-            phone=request.form.get("phone"), billing_address=request.form.get("billing_address"),
-            pricing_mode=request.form.get("pricing_mode", "standard"),
-            discount_pct=float(request.form.get("discount_pct") or 0),
-            flat_rate_per_pallet=float(request.form.get("flat_rate_per_pallet") or 25),
-            zone_id=int(request.form["zone_id"]) if request.form.get("zone_id") else None,
-        )
-        db.session.add(c)
-        db.session.commit()
-
-        portal_email = request.form.get("portal_email")
-        if portal_email:
-            user = User(email=portal_email.strip().lower(), name=c.name, role="customer", customer_id=c.id)
-            user.set_password(request.form.get("portal_password") or "changeme123")
-            db.session.add(user)
+            cust = db.session.get(Customer, int(request.form["customer_id"]))
+            parcels = int(request.form.get("parcels") or 0)
+            pallets = int(request.form.get("pallets") or 0)
+            weight = float(request.form.get("weight_kg") or 0)
+            job = request.form.get("job_type", "delivery")
+            addr = request.form.get("address")
+            pc = request.form.get("postcode", "").upper().strip()
+            o = Order(
+                ref=next_ref("HL", Order, "ref"),
+                customer=cust,
+                job_type=job,
+                recipient=request.form.get("recipient"),
+                phone=request.form.get("phone"),
+                address=addr,
+                postcode=pc,
+                pallets=pallets,
+                weight_kg=weight,
+                service=request.form.get("service", "next-day"),
+                notes=request.form.get("notes"),
+            )
+            set_legs(o, cust, job, addr, pc)
+            apply_scheduling(o, request.form)
+            o.pallet_length = float(request.form.get("pallet_length") or 0)
+            o.pallet_width = float(request.form.get("pallet_width") or 0)
+            o.pallet_height = float(request.form.get("pallet_height") or 0)
+            o.weight_per_pallet = float(request.form.get("weight_per_pallet") or 0)
+            if o.weight_per_pallet and not weight:
+                o.weight_kg = o.weight_per_pallet * (pallets or 0)
+            o.price = quote_order(cust, pc, pallets, o.weight_kg)
+            db.session.add(o)
+            db.session.flush()
+            barcodes = [b.strip() for b in
+                        (request.form.get("barcodes") or "").splitlines() if b.strip()]
+            build_items(o, parcels, pallets, barcodes)
             db.session.commit()
-            flash(f"Customer {c.name} added with portal login {portal_email}.", "success")
-        else:
-            flash(f"Customer {c.name} added.", "success")
-        return redirect(url_for("customers_list"))
+            cutoff = same_day_cutoff_warning(o)
+            if cutoff:
+                flash(cutoff, "error")
+            flash(f"{o.job_type.title()} {o.ref} created — "
+                  f"{parcels} parcel(s), {pallets} pallet(s), £{o.price:.2f}.", "ok")
+            return redirect(url_for("pending_board"))
+        return render_template("order_new.html", customers=customers)
 
-    # -----------------------------------------------------------------
-    # Dispatcher: route planner
-    # -----------------------------------------------------------------
+    @app.route("/api/quote")
+    @login_required("admin", "dispatcher")
+    def api_quote():
+        cust = db.session.get(Customer, int(request.args.get("customer_id", 0)))
+        price = quote_order(cust, request.args.get("postcode", ""),
+                            int(request.args.get("pallets") or 1),
+                            float(request.args.get("weight") or 0))
+        return jsonify(price=price)
 
+    # ---- route planning ----
     @app.route("/routes")
-    @login_required
+    @login_required("admin", "dispatcher")
     def routes_list():
-        require_role("admin", "dispatcher")
-        drivers = Driver.query.order_by(Driver.name).all()
-        unassigned = Order.query.filter_by(status="pending").order_by(Order.delivery_date).all()
-        active_by_driver = {}
-        for d in drivers:
-            active_by_driver[d.id] = Order.query.filter(
-                Order.driver_id == d.id,
-                Order.status.in_(["assigned", "picked_up", "in_transit"])
-            ).order_by(Order.updated_at).all()
-        return render_template("routes.html", drivers=drivers, unassigned=unassigned,
-                                active_by_driver=active_by_driver, today=date.today().isoformat())
+        rs = Route.query.order_by(Route.run_date.desc(), Route.id.desc()).all()
+        return render_template("routes.html", routes=rs)
 
-    @app.route("/routes/build", methods=["POST"])
-    @login_required
-    def routes_build():
-        require_role("admin", "dispatcher")
-        driver_id = int(request.form["driver_id"])
-        order_ids = request.form.getlist("order_ids")
-        driver = Driver.query.get_or_404(driver_id)
-        orders = Order.query.filter(Order.id.in_(order_ids)).all()
-        ordered = optimise_stops(orders, DEPOT_POSTCODE)
-        for order in ordered:
-            order.driver_id = driver.id
-            order.vehicle_id = driver.current_vehicle_id
-            order.status = "assigned"
-            log_event(order, "assigned", f"Route built for {driver.name}")
-        driver.status = "on_route"
-        db.session.commit()
-        flash(f"Built optimised route for {driver.name}: {len(ordered)} stop(s).", "success")
-        return redirect(url_for("routes_list"))
-
-    @app.route("/routes/<int:driver_id>/reoptimise", methods=["POST"])
-    @login_required
-    def routes_reoptimise(driver_id):
-        require_role("admin", "dispatcher")
-        driver = Driver.query.get_or_404(driver_id)
-        orders = Order.query.filter(
-            Order.driver_id == driver.id,
-            Order.status.in_(["assigned", "picked_up", "in_transit"])
-        ).all()
-        ordered = optimise_stops(orders, DEPOT_POSTCODE)
-        base = datetime.utcnow()
-        for i, order in enumerate(ordered):
-            order.updated_at = base + timedelta(seconds=i)  # encodes new sequence order
-        db.session.commit()
-        flash(f"Re-optimised {len(ordered)} stop(s) for {driver.name}.", "success")
-        return redirect(url_for("routes_list"))
-
-    # -----------------------------------------------------------------
-    # Dispatcher: pending work control board
-    # -----------------------------------------------------------------
-
-    @app.route("/pending")
-    @login_required
-    def pending_board():
-        require_role("admin", "dispatcher")
-        view = request.args.get("view", "status")
-        active = Order.query.filter(Order.status.in_(
-            ["pending", "assigned", "picked_up", "in_transit"])).all()
-
-        awaiting_collection = [o for o in active if o.job_type == "collection" and o.status == "pending"]
-        awaiting_delivery = [o for o in active if o.job_type == "delivery" and o.status == "pending"]
-
-        by_driver = {}
-        for o in active:
-            key = o.driver.name if o.driver else "Unassigned"
-            by_driver.setdefault(key, []).append(o)
-
-        summary = {
-            "collections": len([o for o in active if o.job_type == "collection"]),
-            "deliveries": len([o for o in active if o.job_type == "delivery"]),
-            "pallets": sum(o.pallets or 0 for o in active),
-            "parcels": sum(o.parcels or 0 for o in active),
-        }
-
-        drivers = Driver.query.order_by(Driver.name).all()
-        vehicles = Vehicle.query.order_by(Vehicle.registration).all()
-        tags = {o.id: sla_tag(o) for o in active}
-
-        return render_template("pending.html", view=view, awaiting_collection=awaiting_collection,
-                                awaiting_delivery=awaiting_delivery, by_driver=by_driver,
-                                summary=summary, drivers=drivers, vehicles=vehicles, tags=tags)
-
-    @app.route("/pending/<int:order_id>/allocate", methods=["POST"])
-    @login_required
-    def pending_allocate(order_id):
-        require_role("admin", "dispatcher")
-        order = Order.query.get_or_404(order_id)
-        driver_id = request.form.get("driver_id") or None
-        vehicle_id = request.form.get("vehicle_id") or None
-        order.driver_id = int(driver_id) if driver_id else None
-        order.vehicle_id = int(vehicle_id) if vehicle_id else None
-
-        warning = None
-        if order.vehicle_id:
-            vehicle = Vehicle.query.get(order.vehicle_id)
-            load_on_van = db.session.query(db.func.coalesce(db.func.sum(Order.pallets), 0)).filter(
-                Order.vehicle_id == vehicle.id,
-                Order.status.in_(["assigned", "picked_up", "in_transit"])
-            ).scalar()
-            if load_on_van + (order.pallets or 0) > vehicle.capacity_pallets:
-                warning = f"Warning: {vehicle.registration} capacity ({vehicle.capacity_pallets} pallets) may be exceeded."
-
-        if order.driver_id and order.status == "pending":
-            order.status = "assigned"
-        log_event(order, order.status, "Allocated via pending board")
-        db.session.commit()
-        if warning:
-            flash(warning, "warning")
-        return redirect(url_for("pending_board"))
-
-    @app.route("/pending/<int:order_id>/suggest", methods=["POST"])
-    @login_required
-    def pending_suggest(order_id):
-        require_role("admin", "dispatcher")
-        order = Order.query.get_or_404(order_id)
-        vehicles = Vehicle.query.filter_by(status="available").order_by(Vehicle.capacity_pallets).all()
-        chosen_vehicle = next((v for v in vehicles if v.capacity_pallets >= (order.pallets or 0)), None)
-        chosen_driver = Driver.query.filter_by(status="available").order_by(Driver.name).first()
-
-        if chosen_vehicle:
-            order.vehicle_id = chosen_vehicle.id
-        if chosen_driver:
-            order.driver_id = chosen_driver.id
-            if order.status == "pending":
-                order.status = "assigned"
-        log_event(order, order.status, "Auto-suggested allocation")
-        db.session.commit()
-        if not chosen_vehicle or not chosen_driver:
-            flash("No fully available driver/van combination found — allocate manually.", "warning")
-        else:
-            flash(f"Suggested {chosen_driver.name} in {chosen_vehicle.registration}.", "success")
-        return redirect(url_for("pending_board"))
-
-    # -----------------------------------------------------------------
-    # Driver app
-    # -----------------------------------------------------------------
-
-    @app.route("/driver")
-    @login_required
-    def driver_home():
-        require_role("driver")
-        driver = Driver.query.get(current_user.driver_id)
-        stops = Order.query.filter(
-            Order.driver_id == driver.id,
-            Order.status.in_(["assigned", "picked_up", "in_transit"])
-        ).order_by(Order.updated_at).all()
-        completed_today = Order.query.filter(
-            Order.driver_id == driver.id,
-            Order.status.in_(["delivered", "collected", "failed"]),
-            Order.updated_at >= datetime.combine(date.today(), datetime.min.time())
-        ).count()
-        next_stop = stops[0] if stops else None
-        return render_template("driver_home.html", driver=driver, stops=stops,
-                                next_stop=next_stop, completed_today=completed_today)
-
-    @app.route("/driver/stop/<int:order_id>")
-    @login_required
-    def driver_stop(order_id):
-        require_role("driver")
-        order = Order.query.get_or_404(order_id)
-        if order.driver_id != current_user.driver_id:
-            abort(403)
-        scanned = sum(1 for b in order.boxes if b.scanned)
-        total = len(order.boxes)
-        return render_template("driver_stop.html", order=order, scanned=scanned, total=total)
-
-    @app.route("/driver/stop/<int:order_id>/scan", methods=["POST"])
-    @login_required
-    def driver_scan(order_id):
-        require_role("driver")
-        order = Order.query.get_or_404(order_id)
-        if order.driver_id != current_user.driver_id:
-            abort(403)
-        code = request.form.get("barcode", "").strip()
-        box = OrderBox.query.filter_by(order_id=order.id, barcode=code).first()
-        result = {"ok": False, "message": "Barcode not recognised for this order."}
-        if box:
-            if box.scanned:
-                result = {"ok": True, "message": f"{box.barcode} already scanned.", "duplicate": True}
-            else:
-                box.scanned = True
-                box.scanned_at = datetime.utcnow()
-                db.session.commit()
-                result = {"ok": True, "message": f"{box.barcode} scanned."}
-        scanned = sum(1 for b in order.boxes if b.scanned)
-        total = len(order.boxes)
-        result.update({"scanned": scanned, "total": total, "all_scanned": scanned == total})
-        if request.headers.get("X-Requested-With") == "fetch" or request.accept_mimetypes.best == "application/json":
-            return jsonify(result)
-        flash(result["message"], "success" if result["ok"] else "error")
-        return redirect(url_for("driver_stop", order_id=order.id))
-
-    @app.route("/driver/stop/<int:order_id>/complete", methods=["POST"])
-    @login_required
-    def driver_complete(order_id):
-        require_role("driver")
-        order = Order.query.get_or_404(order_id)
-        if order.driver_id != current_user.driver_id:
-            abort(403)
-
-        exception_reason = request.form.get("exception_reason", "").strip()
-        override_missing = request.form.get("override_missing") == "on"
-        scanned = sum(1 for b in order.boxes if b.scanned)
-        total = len(order.boxes)
-
-        if total > 0 and scanned < total and not override_missing and not exception_reason:
-            flash(f"Only {scanned}/{total} items scanned. Scan the rest, or tick "
-                  f"'complete with items missing' to override.", "error")
-            return redirect(url_for("driver_stop", order_id=order.id))
-
-        for b in order.boxes:
-            if not b.scanned:
-                b.missing = True
-
-        final_status = "failed" if exception_reason else (
-            "collected" if order.job_type == "collection" else "delivered")
-
-        pod = ProofOfDelivery.query.filter_by(order_id=order.id).first()
-        if not pod:
-            pod = ProofOfDelivery(order_id=order.id)
-            db.session.add(pod)
-        pod.recipient_name = request.form.get("recipient_name")
-        pod.signature_data_url = request.form.get("signature_data_url")
-        pod.photo_data_url = request.form.get("photo_data_url") or pod.photo_data_url
-        pod.notes = request.form.get("notes")
-        pod.exception_reason = exception_reason or None
-        pod.boxes_confirmed = scanned
-        pod.boxes_missing = total - scanned
-        pod.delivered_at = datetime.utcnow()
-        order.status = final_status
-        note = f"Exception: {exception_reason}" if exception_reason else (
-            f"Confirmed by {pod.recipient_name or 'recipient'} ({scanned}/{total} items scanned)")
-        log_event(order, final_status, note)
-        db.session.commit()
-
-        send_sms(order.contact_phone, f"Order {order.reference}: {STATUS_LABELS.get(final_status, final_status)}.")
-
-        remaining = Order.query.filter(
-            Order.driver_id == current_user.driver_id,
-            Order.status.in_(["assigned", "picked_up", "in_transit"])
-        ).order_by(Order.updated_at).first()
-
-        if not remaining:
-            driver = Driver.query.get(current_user.driver_id)
-            driver.status = "available"
-            db.session.commit()
-            flash("All stops complete for now.", "success")
-            return redirect(url_for("driver_home"))
-
-        flash("Stop completed. Moving to next stop.", "success")
-        return redirect(url_for("driver_stop", order_id=remaining.id))
-
-    @app.route("/driver/stop/<int:order_id>/pickup", methods=["POST"])
-    @login_required
-    def driver_pickup(order_id):
-        """Mark 'picked up' / 'in transit' without closing the stop - used when
-        a stop has two phases (arrive & load, then depart)."""
-        require_role("driver")
-        order = Order.query.get_or_404(order_id)
-        if order.driver_id != current_user.driver_id:
-            abort(403)
-        order.status = request.form.get("status", "in_transit")
-        log_event(order, order.status, "Driver update")
-        db.session.commit()
-        return redirect(url_for("driver_stop", order_id=order.id))
-
-    # -----------------------------------------------------------------
-    # Customer portal
-    # -----------------------------------------------------------------
-
-    @app.route("/portal")
-    @login_required
-    def portal_home():
-        require_role("customer")
-        customer = Customer.query.get(current_user.customer_id)
-        orders = Order.query.filter_by(customer_id=customer.id).order_by(Order.created_at.desc()).limit(20).all()
-        return render_template("portal_home.html", customer=customer, orders=orders)
-
-    @app.route("/portal/order/new", methods=["GET", "POST"])
-    @login_required
-    def portal_order_new():
-        require_role("customer")
-        customer = Customer.query.get(current_user.customer_id)
+    @app.route("/routes/plan", methods=["GET", "POST"])
+    @login_required("admin", "dispatcher")
+    def route_plan():
+        drivers = Driver.query.filter_by(active=True).all()
+        vehicles = Vehicle.query.filter_by(active=True).all()
+        unassigned = Order.query.filter_by(status="unassigned").all()
         if request.method == "POST":
-            form = request.form.copy()
-            form["customer_id"] = str(customer.id)
-            order = _create_order_from_form(form)
-            flash(f"Order {order.reference} placed.", "success")
-            return redirect(url_for("portal_track", reference=order.reference))
-        return render_template("portal_order_form.html", customer=customer, today=date.today().isoformat())
+            ids = request.form.getlist("order_ids")
+            if not ids:
+                flash("Pick at least one order for the route.", "error")
+                return redirect(url_for("route_plan"))
+            r = Route(
+                ref=next_ref("R", Route, "ref"),
+                name=request.form.get("name") or f"Round {date.today():%d %b}",
+                run_date=datetime.strptime(request.form["run_date"], "%Y-%m-%d").date()
+                if request.form.get("run_date") else date.today(),
+                start_postcode=request.form.get("start_postcode") or "PR2 2TE",
+            )
+            if request.form.get("driver_id"):
+                r.driver_id = int(request.form["driver_id"])
+            if request.form.get("vehicle_id"):
+                r.vehicle_id = int(request.form["vehicle_id"])
+            db.session.add(r)
+            db.session.flush()
+            for oid in ids:
+                o = db.session.get(Order, int(oid))
+                o.status = "assigned"
+                db.session.add(Stop(route=r, order=o))
+            db.session.flush()
+            _sequence_route(r)
+            db.session.commit()
+            flash(f"Route {r.ref} planned with {len(ids)} stops.", "ok")
+            return redirect(url_for("route_detail", rid=r.id))
+        return render_template("route_plan.html", drivers=drivers,
+                               vehicles=vehicles, unassigned=unassigned)
 
-    @app.route("/portal/track/<reference>")
-    @login_required
-    def portal_track(reference):
-        require_role("customer")
-        order = Order.query.filter_by(reference=reference).first_or_404()
-        if order.customer_id != current_user.customer_id:
-            abort(403)
-        return render_template("portal_track.html", order=order, status_labels=STATUS_LABELS)
+    @app.route("/routes/<int:rid>")
+    @login_required("admin", "dispatcher")
+    def route_detail(rid):
+        r = db.session.get(Route, rid) or abort(404)
+        drivers = Driver.query.filter_by(active=True).all()
+        vehicles = Vehicle.query.filter_by(active=True).all()
+        return render_template("route_detail.html", r=r, drivers=drivers,
+                               vehicles=vehicles)
+
+    @app.route("/routes/<int:rid>/optimise", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def route_optimise(rid):
+        r = db.session.get(Route, rid) or abort(404)
+        _sequence_route(r)
+        db.session.commit()
+        flash("Stops re-sequenced for shortest round.", "ok")
+        return redirect(url_for("route_detail", rid=rid))
+
+    @app.route("/routes/<int:rid>/assign", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def route_assign(rid):
+        r = db.session.get(Route, rid) or abort(404)
+        r.driver_id = int(request.form["driver_id"]) if request.form.get("driver_id") else None
+        r.vehicle_id = int(request.form["vehicle_id"]) if request.form.get("vehicle_id") else None
+        db.session.commit()
+        flash("Driver and vehicle updated.", "ok")
+        return redirect(url_for("route_detail", rid=rid))
+
+    @app.route("/routes/<int:rid>/dispatch", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def route_dispatch(rid):
+        r = db.session.get(Route, rid) or abort(404)
+        if not r.driver_id:
+            flash("Assign a driver before dispatching.", "error")
+            return redirect(url_for("route_detail", rid=rid))
+        r.status = "dispatched"
+        sent = 0
+        for s in r.stops:
+            s.order.status = "out"
+            if s.order.phone:
+                if s.order.job_type == "collection":
+                    line = (f"your Heliolink collection {s.order.ref} is "
+                            f"scheduled today.")
+                else:
+                    line = (f"your Heliolink delivery {s.order.ref} is out "
+                            f"for delivery today.")
+                send_sms(s.order.phone,
+                         f"Hi {s.order.recipient or 'there'}, {line} "
+                         f"Track: {request.host_url}track/{s.order.ref}",
+                         order_ref=s.order.ref)
+                sent += 1
+        db.session.commit()
+        flash(f"Route dispatched. {sent} customer text(s) sent.", "ok")
+        return redirect(url_for("route_detail", rid=rid))
+
+    # ---- driver PWA ----
+    @app.route("/driver")
+    @login_required("driver", "admin")
+    def driver_home():
+        u = current_user()
+        drv = u.driver_profile
+        rs = []
+        allocated = []
+        if drv:
+            rs = Route.query.filter(Route.driver_id == drv.id,
+                                    Route.run_date >= date.today())\
+                .order_by(Route.run_date).all()
+            allocated = [o for o in Order.query.filter_by(assigned_driver_id=drv.id).all()
+                         if o.status not in ("delivered", "collected", "failed")]
+        return render_template("driver_home.html", routes=rs, allocated=allocated)
+
+    @app.route("/driver/route/<int:rid>")
+    @login_required("driver", "admin")
+    def driver_route(rid):
+        r = db.session.get(Route, rid) or abort(404)
+        return render_template("driver_route.html", r=r)
+
+    @app.route("/driver/stop/<int:sid>", methods=["GET", "POST"])
+    @login_required("driver", "admin")
+    def driver_stop(sid):
+        s = db.session.get(Stop, sid) or abort(404)
+        mode = "collect" if s.order.job_type == "collection" else "deliver"
+        items = s.order.items
+        total = len(items)
+        scanned = s.order.scanned_count
+        if request.method == "POST":
+            outcome = request.form.get("outcome", "delivered")
+            override = request.form.get("override_missing") == "on"
+
+            # Scan gate: for a successful delivery/collection every box must be
+            # scanned, unless the driver explicitly confirms items are missing.
+            if outcome in ("delivered", "collected") and total and scanned < total \
+                    and not override:
+                miss = total - scanned
+                flash(f"{miss} of {total} box(es) not scanned. Scan the rest, "
+                      f"or tick 'complete with missing items' to close short.",
+                      "error")
+                return render_template("driver_stop.html", s=s, mode=mode,
+                                       total=total, scanned=scanned, warn=True)
+
+            pod = s.pod or POD(stop=s)
+            pod.signed_by = request.form.get("signed_by")
+            pod.notes = request.form.get("notes")
+            pod.gps = request.form.get("gps")
+            pod.outcome = outcome
+
+            photo = request.files.get("photo")
+            if photo and photo.filename:
+                pod.photo = photo.read()
+                pod.photo_mime = photo.mimetype or "image/jpeg"
+
+            sig = request.form.get("signature_data")
+            if sig and sig.startswith("data:image"):
+                pod.signature = base64.b64decode(sig.split(",", 1)[1])
+
+            db.session.add(pod)
+            # any unscanned boxes on a short close are flagged missing
+            if outcome in ("delivered", "collected") and override:
+                for it in items:
+                    if it.status not in ("delivered", "collected"):
+                        it.status = "missing"
+            s.status = outcome
+            s.completed_at = datetime.utcnow()
+            s.order.status = outcome
+            db.session.flush()
+
+            # customer confirmation text
+            if s.order.phone:
+                job = s.order.job_type
+                if outcome in ("delivered", "collected"):
+                    verb = "collected" if job == "collection" else "delivered"
+                    msg = (f"Your Heliolink {job} {s.order.ref} has been "
+                           f"{verb}. Thank you.")
+                else:
+                    msg = (f"We attempted your Heliolink {job} {s.order.ref} "
+                           f"but could not complete it. We'll be in touch to "
+                           f"rearrange.")
+                send_sms(s.order.phone, msg, order_ref=s.order.ref)
+
+            if all(st.status in ("delivered", "failed", "collected")
+                   for st in s.route.stops):
+                s.route.status = "completed"
+            db.session.commit()
+
+            # auto-advance to the next pending stop on the optimised route
+            nxt = next((st for st in s.route.stops
+                        if st.sequence > s.sequence
+                        and st.status not in ("delivered", "failed", "collected")),
+                       None)
+            if nxt:
+                flash(f"{s.order.ref} done. Next stop {nxt.sequence}: "
+                      f"{nxt.order.recipient or nxt.order.customer.name}.", "ok")
+                return redirect(url_for("driver_stop", sid=nxt.id))
+            flash("That was the last stop — route complete.", "ok")
+            return redirect(url_for("driver_route", rid=s.route_id))
+        return render_template("driver_stop.html", s=s, mode=mode,
+                               total=total, scanned=scanned)
+
+    @app.route("/driver/stop/<int:sid>/arrive", methods=["POST"])
+    @login_required("driver", "admin")
+    def driver_arrive(sid):
+        s = db.session.get(Stop, sid) or abort(404)
+        s.status = "arrived"
+        db.session.commit()
+        return redirect(url_for("driver_stop", sid=sid))
+
+    # ---- barcode scanning (delivery, collection, and van load) ----
+    @app.route("/driver/stop/<int:sid>/scan")
+    @login_required("driver", "admin")
+    def driver_scan(sid):
+        s = db.session.get(Stop, sid) or abort(404)
+        mode = "collect" if s.order.job_type == "collection" else "deliver"
+        return render_template("driver_scan.html", s=s, mode=mode,
+                               items=s.order.items)
+
+    @app.route("/driver/route/<int:rid>/load")
+    @login_required("driver", "admin")
+    def driver_load(rid):
+        r = db.session.get(Route, rid) or abort(404)
+        items = [i for st in r.stops for i in st.order.items]
+        return render_template("driver_load.html", r=r, items=items)
+
+    @app.route("/api/scan", methods=["POST"])
+    @login_required("driver", "admin")
+    def api_scan():
+        data = request.get_json(silent=True) or {}
+        barcode = (data.get("barcode") or "").strip()
+        scan_type = data.get("scan_type") or "deliver"
+        gps = data.get("gps")
+        if not barcode:
+            return jsonify(result="empty"), 400
+
+        # scope of the scan: a single stop (deliver/collect) or a whole route (load)
+        stop = db.session.get(Stop, int(data["stop_id"])) if data.get("stop_id") else None
+        route = db.session.get(Route, int(data["route_id"])) if data.get("route_id") else None
+        if stop and not route:
+            route = stop.route
+
+        if stop:
+            pool = list(stop.order.items)
+        elif route:
+            pool = [i for st in route.stops for i in st.order.items]
+        else:
+            return jsonify(result="no-scope"), 400
+
+        item = next((i for i in pool if i.barcode == barcode), None)
+        result = "matched"
+        target = "loaded" if scan_type == "load" else \
+                 ("collected" if scan_type == "collect" else "delivered")
+
+        if item:
+            if item.status in ("delivered", "collected") and scan_type != "load":
+                result = "duplicate"
+            else:
+                item.status = target
+                item.scanned_at = datetime.utcnow()
+        else:
+            result = "unknown"
+            # on a collection, an unrecognised barcode is a new item being picked up
+            if stop and scan_type == "collect":
+                item = Item(order=stop.order, barcode=barcode, kind="parcel",
+                            status="collected", scanned_at=datetime.utcnow())
+                db.session.add(item)
+                db.session.flush()
+                result = "added"
+
+        drv = current_user().driver_profile
+        db.session.add(Scan(barcode=barcode, item_id=item.id if item else None,
+                            stop_id=stop.id if stop else None,
+                            route_id=route.id if route else None,
+                            driver_id=drv.id if drv else None,
+                            scan_type=scan_type, result=result, gps=gps))
+        db.session.commit()
+
+        done = sum(1 for i in pool if i.status in (target, "delivered", "collected"))
+        return jsonify(result=result, barcode=barcode, done=done,
+                       total=len(pool), kind=(item.kind if item else None))
+
+    # ---- POD image serving ----
+    @app.route("/pod/<int:pid>/photo")
+    @login_required("admin", "dispatcher", "driver")
+    def pod_photo(pid):
+        p = db.session.get(POD, pid) or abort(404)
+        if not p.photo:
+            abort(404)
+        return send_file(io.BytesIO(p.photo),
+                         mimetype=p.photo_mime or "image/jpeg")
+
+    @app.route("/pod/<int:pid>/signature")
+    @login_required("admin", "dispatcher", "driver")
+    def pod_signature(pid):
+        p = db.session.get(POD, pid) or abort(404)
+        if not p.signature:
+            abort(404)
+        return send_file(io.BytesIO(p.signature), mimetype="image/png")
+
+    # ---- customer self-order portal (no login, access code) ----
+    @app.route("/portal", methods=["GET", "POST"])
+    def portal():
+        if request.method == "POST":
+            c = Customer.query.filter_by(
+                portal_code=request.form["code"].strip()).first()
+            if c:
+                session["portal_customer"] = c.id
+                return redirect(url_for("portal_home"))
+            flash("Access code not recognised.", "error")
+        return render_template("portal_login.html")
+
+    @app.route("/portal/home", methods=["GET", "POST"])
+    def portal_home():
+        cid = session.get("portal_customer")
+        c = db.session.get(Customer, cid) if cid else None
+        if not c:
+            return redirect(url_for("portal"))
+        if request.method == "POST":
+            parcels = int(request.form.get("parcels") or 0)
+            pallets = int(request.form.get("pallets") or 0)
+            weight = float(request.form.get("weight_kg") or 0)
+            job = request.form.get("job_type", "delivery")
+            addr = request.form.get("address")
+            pc = request.form.get("postcode", "").upper().strip()
+            o = Order(
+                ref=next_ref("HL", Order, "ref"),
+                customer=c,
+                job_type=job,
+                recipient=request.form.get("recipient"),
+                phone=request.form.get("phone"),
+                address=addr,
+                postcode=pc,
+                pallets=pallets,
+                weight_kg=weight,
+                service=request.form.get("service", "next-day"),
+                notes=request.form.get("notes"),
+            )
+            set_legs(o, c, job, addr, pc)
+            apply_scheduling(o, request.form)
+            o.pallet_length = float(request.form.get("pallet_length") or 0)
+            o.pallet_width = float(request.form.get("pallet_width") or 0)
+            o.pallet_height = float(request.form.get("pallet_height") or 0)
+            o.weight_per_pallet = float(request.form.get("weight_per_pallet") or 0)
+            if o.weight_per_pallet and not weight:
+                o.weight_kg = o.weight_per_pallet * (pallets or 0)
+            o.price = quote_order(c, pc, pallets, o.weight_kg)
+            db.session.add(o)
+            db.session.flush()
+            build_items(o, parcels, pallets)
+            db.session.commit()
+            cutoff = same_day_cutoff_warning(o)
+            if cutoff:
+                flash(cutoff, "error")
+            flash(f"{o.job_type.title()} {o.ref} placed. "
+                  f"Estimated charge £{o.price:.2f}.", "ok")
+            return redirect(url_for("portal_track"))
+        orders = Order.query.filter_by(customer_id=c.id)\
+            .order_by(Order.created_at.desc()).limit(50).all()
+        return render_template("portal_home.html", c=c, orders=orders)
+
+    @app.route("/portal/logout")
+    def portal_logout():
+        session.pop("portal_customer", None)
+        return redirect(url_for("portal"))
+
+    def _portal_customer():
+        cid = session.get("portal_customer")
+        return db.session.get(Customer, cid) if cid else None
+
+    @app.route("/portal/track")
+    def portal_track():
+        c = _portal_customer()
+        if not c:
+            return redirect(url_for("portal"))
+        active = [o for o in c.orders if o.status in ("out", "assigned")]
+        recent = sorted([o for o in c.orders], key=lambda o: o.created_at, reverse=True)[:40]
+        return render_template("portal_track.html", c=c, active=active, recent=recent)
 
     @app.route("/portal/invoices")
-    @login_required
     def portal_invoices():
-        require_role("customer")
-        invoices = Invoice.query.filter_by(customer_id=current_user.customer_id).order_by(
-            Invoice.created_at.desc()).all()
-        return render_template("portal_invoices.html", invoices=invoices)
+        c = _portal_customer()
+        if not c:
+            return redirect(url_for("portal"))
+        inv = sorted(c.invoices, key=lambda i: i.created_at, reverse=True)
+        return render_template("portal_invoices.html", c=c, invoices=inv)
 
-    @app.route("/portal/invoices/<int:invoice_id>")
-    @login_required
-    def portal_invoice_detail(invoice_id):
-        require_role("customer")
-        invoice = Invoice.query.get_or_404(invoice_id)
-        if invoice.customer_id != current_user.customer_id:
+    @app.route("/portal/invoice/<int:iid>")
+    def portal_invoice(iid):
+        c = _portal_customer()
+        if not c:
+            return redirect(url_for("portal"))
+        inv = db.session.get(Invoice, iid) or abort(404)
+        if inv.customer_id != c.id:
             abort(403)
-        return render_template("invoice_detail.html", invoice=invoice)
+        return render_template("invoice_detail.html", inv=inv, host=request.host_url,
+                               portal=True)
 
-    @app.route("/pod/ref/<reference>")
-    def pod_public(reference):
-        """Public (unauthenticated, unguessable-reference) POD view, linked
-        from invoices so customers/finance can check proof of delivery."""
-        order = Order.query.filter_by(reference=reference).first_or_404()
-        return render_template("pod_public.html", order=order)
+    @app.route("/portal/label/<int:oid>")
+    def portal_label(oid):
+        c = _portal_customer()
+        if not c:
+            return redirect(url_for("portal"))
+        o = db.session.get(Order, oid) or abort(404)
+        if o.customer_id != c.id:
+            abort(403)
+        return render_template("label.html", o=o)
 
-    # -----------------------------------------------------------------
-    # Rates & invoicing
-    # -----------------------------------------------------------------
+    # ---- public tracking ----
+    @app.route("/track/<ref>")
+    def track(ref):
+        o = Order.query.filter_by(ref=ref).first() or abort(404)
+        return render_template("track.html", o=o)
 
-    @app.route("/rates/settings", methods=["GET", "POST"])
-    @login_required
-    def rate_settings():
-        require_role("admin", "dispatcher")
-        settings = RateSettings.query.first()
+    # ---- customer & rate management ----
+    @app.route("/customers")
+    @login_required("admin", "dispatcher")
+    def customers():
+        cs = Customer.query.order_by(Customer.name).all()
+        return render_template("customers.html", customers=cs)
+
+    @app.route("/customers/new", methods=["GET", "POST"])
+    @app.route("/customers/<int:cid>/edit", methods=["GET", "POST"])
+    @login_required("admin", "dispatcher")
+    def customer_edit(cid=None):
+        c = db.session.get(Customer, cid) if cid else None
         if request.method == "POST":
-            for field in ["fuel_price_per_litre", "driver_rate_per_hour", "avg_speed_mph",
-                          "handling_min_per_pallet", "fixed_cost_per_job", "margin_pct",
-                          "service_uplift_24h_pct", "fuel_surcharge_pct", "vat_pct"]:
-                setattr(settings, field, float(request.form[field]))
-            settings.round_trip = request.form.get("round_trip") == "on"
+            if not c:
+                c = Customer(portal_code=secrets.token_hex(4).upper())
+                db.session.add(c)
+            c.name = request.form["name"]
+            c.contact_name = request.form.get("contact_name")
+            c.email = request.form.get("email")
+            c.phone = request.form.get("phone")
+            c.address = request.form.get("address")
+            c.postcode = request.form.get("postcode", "").upper().strip()
+            c.rate_base = float(request.form.get("rate_base") or 0)
+            c.rate_per_mile = float(request.form.get("rate_per_mile") or 0)
+            c.rate_per_pallet = float(request.form.get("rate_per_pallet") or 0)
+            c.rate_per_kg = float(request.form.get("rate_per_kg") or 0)
+            c.min_charge = float(request.form.get("min_charge") or 0)
+            c.fuel_surcharge_pct = float(request.form.get("fuel_surcharge_pct") or 0)
+            c.pricing_mode = request.form.get("pricing_mode", "flat")
+            c.discount_pct = float(request.form.get("discount_pct") or 0)
             db.session.commit()
-            flash("Rate settings updated.", "success")
+            flash("Customer saved.", "ok")
+            return redirect(url_for("customers"))
+        return render_template("customer_edit.html", c=c)
+
+    @app.route("/customers/rate-template")
+    @login_required("admin", "dispatcher")
+    def rate_template():
+        import csv
+        from io import StringIO
+        buf = StringIO()
+        w = csv.writer(buf)
+        w.writerow(["name", "contact_name", "email", "phone", "address",
+                    "postcode", "rate_base", "rate_per_mile", "rate_per_pallet",
+                    "rate_per_kg", "min_charge", "fuel_surcharge_pct"])
+        w.writerow(["Example Ltd", "Jane", "jane@example.com", "07700900000",
+                    "1 Some Road", "M1 1AA", "8.00", "0.55", "6.00", "0.05",
+                    "25.00", "15"])
+        return app.response_class(buf.getvalue(), mimetype="text/csv", headers={
+            "Content-Disposition": "attachment; filename=voya_rate_card_template.csv"})
+
+    @app.route("/customers/rate-import", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def rate_import():
+        import csv
+        from io import StringIO
+        f = request.files.get("file")
+        if not f:
+            flash("No file chosen.", "error")
+            return redirect(url_for("customers"))
+        rows = list(csv.DictReader(StringIO(f.read().decode("utf-8-sig"))))
+        added = updated = 0
+        for r in rows:
+            name = (r.get("name") or "").strip()
+            if not name:
+                continue
+            c = Customer.query.filter_by(name=name).first()
+            if not c:
+                c = Customer(name=name, portal_code=secrets.token_hex(4).upper())
+                db.session.add(c)
+                added += 1
+            else:
+                updated += 1
+            for fld in ("contact_name", "email", "phone", "address", "postcode"):
+                if r.get(fld):
+                    setattr(c, fld, r[fld].strip())
+            for fld in ("rate_base", "rate_per_mile", "rate_per_pallet",
+                        "rate_per_kg", "min_charge", "fuel_surcharge_pct"):
+                if r.get(fld):
+                    try:
+                        setattr(c, fld, float(r[fld]))
+                    except ValueError:
+                        pass
+        db.session.commit()
+        flash(f"Rate cards imported — {added} added, {updated} updated.", "ok")
+        return redirect(url_for("customers"))
+
+    # ---- standard rate card (parameters) ----
+    @app.route("/rates/settings", methods=["GET", "POST"])
+    @login_required("admin", "dispatcher")
+    def rate_settings():
+        s = get_settings()
+        if request.method == "POST":
+            for f in ("fuel_price_per_litre", "driver_rate_per_hour", "avg_speed_mph",
+                      "handling_min_per_pallet", "fixed_cost_per_job", "margin_pct",
+                      "service_uplift_24h_pct", "mpg_panel", "mpg_25t", "mpg_75t"):
+                if request.form.get(f) not in (None, ""):
+                    setattr(s, f, float(request.form[f]))
+            s.round_trip = request.form.get("round_trip") == "on"
+            db.session.commit()
+            flash("Standard rate parameters saved.", "ok")
             return redirect(url_for("rate_settings"))
-        example_order = Order.query.first()
-        example = None
-        if example_order:
-            example = cost_breakdown(example_order, settings, Zone.query.all(), depot_postcode=DEPOT_POSTCODE)
-        return render_template("rate_settings.html", settings=settings, example=example)
+        # sample recommendation so the effect is visible
+        sample = recommend_rate("M1 1AA", 2, 300, "48", settings=s)
+        return render_template("rate_settings.html", s=s, sample=sample)
 
     @app.route("/rates/regions", methods=["GET", "POST"])
-    @login_required
+    @login_required("admin", "dispatcher")
     def rate_regions():
-        require_role("admin", "dispatcher")
         if request.method == "POST":
-            z = Zone(name=request.form["name"], outward_prefixes=request.form["outward_prefixes"],
-                      multiplier=float(request.form["multiplier"]))
-            db.session.add(z)
+            for z in Zone.query.all():
+                v = request.form.get(f"mult_{z.id}")
+                if v not in (None, ""):
+                    z.multiplier = float(v)
             db.session.commit()
-            flash(f"Zone {z.name} added.", "success")
+            flash("Region multipliers saved.", "ok")
             return redirect(url_for("rate_regions"))
-        zones = Zone.query.all()
-        return render_template("rate_regions.html", zones=zones)
+        # areas grouped by region for reference
+        from optimise import REGION_OF
+        by_region = {}
+        for area, reg in REGION_OF.items():
+            by_region.setdefault(reg, []).append(area)
+        zones = Zone.query.order_by(Zone.region).all()
+        return render_template("rate_regions.html", zones=zones, by_region=by_region)
 
     @app.route("/rates/calculator")
-    @login_required
+    @login_required("admin", "dispatcher")
     def rate_calculator():
-        require_role("admin", "dispatcher")
-        vehicles = Vehicle.SIZE_CAPACITY.keys()
-        return render_template("rate_calculator.html", vehicle_sizes=vehicles)
+        return render_template("rate_calculator.html",
+                               customers=Customer.query.order_by(Customer.name).all())
 
-    @app.route("/api/recommend", methods=["POST"])
-    @login_required
+    @app.route("/api/recommend")
+    @login_required("admin", "dispatcher")
     def api_recommend():
-        require_role("admin", "dispatcher")
-        data = request.get_json(force=True)
+        pc = request.args.get("postcode", "")
+        pallets = int(request.args.get("pallets") or 1)
+        wpp = float(request.args.get("weight_per_pallet") or 0)
+        service = request.args.get("service", "48")
+        vtype = request.args.get("vtype") or None
+        discount = float(request.args.get("discount") or 0)
+        rec = recommend_rate(pc, pallets, wpp, service, vtype)
+        rec["discount_pct"] = discount
+        rec["net"] = round(rec["recommended"] * (1 - discount / 100.0), 2)
+        return jsonify(rec)
 
-        class Stub:
-            pass
-        stub = Stub()
-        stub.job_type = "delivery"
-        stub.delivery_postcode = data.get("postcode", "M1")
-        stub.collection_postcode = data.get("postcode", "M1")
-        stub.pallets = int(data.get("pallets") or 1)
-        stub.timing = data.get("timing", "48h")
+    # ---- fleet ----
+    @app.route("/fleet")
+    @login_required("admin", "dispatcher")
+    def fleet():
+        return render_template("fleet.html",
+                               drivers=Driver.query.all(),
+                               vehicles=Vehicle.query.all())
 
-        settings = RateSettings.query.first()
-        zones = Zone.query.all()
-        breakdown = cost_breakdown(stub, settings, zones, vehicle_size=data.get("vehicle", "panel_van"),
-                                    depot_postcode=DEPOT_POSTCODE)
-        return jsonify(breakdown)
+    @app.route("/fleet/vehicle", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def add_vehicle():
+        v = Vehicle(reg=request.form["reg"].upper().strip(),
+                    make_model=request.form.get("make_model"),
+                    vtype=request.form.get("vtype", "panel van"),
+                    capacity_pallets=int(request.form.get("capacity_pallets") or 0),
+                    mpg=float(request.form.get("mpg") or 0))
+        db.session.add(v)
+        db.session.commit()
+        flash("Vehicle added.", "ok")
+        return redirect(url_for("fleet"))
 
-    @app.route("/invoices")
-    @login_required
-    def invoices_list():
-        require_role("admin", "dispatcher")
-        invoices = Invoice.query.order_by(Invoice.created_at.desc()).all()
-        uninvoiced_count = Order.query.filter(
-            Order.status.in_(["delivered", "collected"]), Order.invoiced == False  # noqa: E712
-        ).count()
-        return render_template("invoices.html", invoices=invoices, uninvoiced_count=uninvoiced_count)
+    @app.route("/fleet/driver", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def add_driver():
+        email = request.form["email"].strip().lower()
+        if User.query.filter_by(email=email).first():
+            flash("A user with that email already exists.", "error")
+            return redirect(url_for("fleet"))
+        u = User(name=request.form["name"], email=email, role="driver",
+                 phone=request.form.get("phone"))
+        u.set_password(request.form.get("password") or "driver123")
+        db.session.add(u)
+        db.session.flush()
+        db.session.add(Driver(user=u, phone=u.phone,
+                              licence_no=request.form.get("licence_no")))
+        db.session.commit()
+        flash("Driver added.", "ok")
+        return redirect(url_for("fleet"))
 
-    @app.route("/invoices/run", methods=["POST"])
-    @login_required
-    def invoices_run():
-        require_role("admin", "dispatcher")
-        settings = RateSettings.query.first()
-        completed = Order.query.filter(
-            Order.status.in_(["delivered", "collected"]), Order.invoiced == False  # noqa: E712
-        ).all()
+    # ---- reporting ----
+    @app.route("/reports")
+    @login_required("admin", "dispatcher")
+    def reports():
+        from datetime import timedelta
+        period = request.args.get("period", "7")   # 1 | 7 | 30 | all
+        since = None
+        if period != "all":
+            since = datetime.utcnow() - timedelta(days=int(period))
 
-        by_customer = {}
-        for o in completed:
-            by_customer.setdefault(o.customer_id, []).append(o)
+        def in_window(q, col):
+            return q.filter(col >= since) if since else q
 
-        created = 0
-        for customer_id, order_list in by_customer.items():
-            customer = Customer.query.get(customer_id)
-            subtotal = 0.0
-            for o in order_list:
-                price = o.quoted_price or 0.0
-                price += sum(s.amount for s in o.surcharges)
-                subtotal += price
-            fuel_surcharge = round(subtotal * settings.fuel_surcharge_pct / 100.0, 2)
-            vat = round((subtotal + fuel_surcharge) * settings.vat_pct / 100.0, 2)
-            total = round(subtotal + fuel_surcharge + vat, 2)
+        # completed stops in the window
+        stops_q = in_window(Stop.query.filter(
+            Stop.status.in_(["delivered", "failed", "collected"])), Stop.completed_at)
+        stops = stops_q.all()
 
-            invoice = Invoice(
-                invoice_number="INV-" + datetime.utcnow().strftime("%y%m%d") + "-" + str(customer_id).zfill(3),
-                customer_id=customer_id, period_start=date.today() - timedelta(days=7),
-                period_end=date.today(), subtotal=round(subtotal, 2),
-                fuel_surcharge=fuel_surcharge, vat=vat, total=total,
+        drops = sum(1 for s in stops if s.order.job_type == "delivery")
+        collections = sum(1 for s in stops if s.order.job_type == "collection")
+        success_stops = sum(1 for s in stops if s.status in ("delivered", "collected"))
+        failed_stops = sum(1 for s in stops if s.status == "failed")
+        completed = len(stops)
+        success = round(100 * success_stops / completed, 1) if completed else 0
+
+        # parcels / pallets moved, split by delivery vs collection
+        items_q = in_window(
+            Item.query.filter(Item.status.in_(["delivered", "collected"])),
+            Item.scanned_at)
+        items = items_q.all()
+        parcels_del = sum(1 for i in items if i.kind == "parcel" and i.status == "delivered")
+        pallets_del = sum(1 for i in items if i.kind == "pallet" and i.status == "delivered")
+        parcels_col = sum(1 for i in items if i.kind == "parcel" and i.status == "collected")
+        pallets_col = sum(1 for i in items if i.kind == "pallet" and i.status == "collected")
+
+        # delivered-in-full: delivery stops where every expected item was scanned
+        del_stops = [s for s in stops if s.order.job_type == "delivery"
+                     and s.status == "delivered"]
+        in_full = sum(1 for s in del_stops
+                      if s.order.items and s.order.scanned_count >= len(s.order.items))
+        difot = round(100 * in_full / len(del_stops), 1) if del_stops else 0
+
+        routes_run = in_window(Route.query.filter(
+            Route.status.in_(["dispatched", "completed"])), Route.created_at).count()
+
+        # per-driver
+        driver_rows = []
+        for drv in Driver.query.all():
+            ds = [s for s in stops if s.route.driver_id == drv.id]
+            d_ok = sum(1 for s in ds if s.status in ("delivered", "collected"))
+            d_fail = sum(1 for s in ds if s.status == "failed")
+            driver_rows.append({"name": drv.user.name if drv.user else "—",
+                                "done": d_ok, "failed": d_fail,
+                                "rate": round(100 * d_ok / (d_ok + d_fail))
+                                if (d_ok + d_fail) else 0})
+
+        revenue = sum(s.order.price for s in stops
+                      if s.status in ("delivered", "collected"))
+
+        k = dict(period=period, drops=drops, collections=collections,
+                 completed=completed, success=success, failed=failed_stops,
+                 difot=difot, routes_run=routes_run,
+                 parcels_del=parcels_del, pallets_del=pallets_del,
+                 parcels_col=parcels_col, pallets_col=pallets_col,
+                 parcels_total=parcels_del + parcels_col,
+                 pallets_total=pallets_del + pallets_col,
+                 revenue=round(revenue, 2))
+        return render_template("reports.html", k=k, driver_rows=driver_rows)
+
+    @app.route("/reports/export")
+    @login_required("admin", "dispatcher")
+    def reports_export():
+        import csv
+        from io import StringIO
+        buf = StringIO()
+        w = csv.writer(buf)
+        w.writerow(["Order", "Type", "Customer", "Postcode", "Status",
+                    "Parcels", "Pallets", "Scanned", "Price", "Completed"])
+        for s in Stop.query.filter(
+                Stop.status.in_(["delivered", "failed", "collected"])).all():
+            o = s.order
+            w.writerow([o.ref, o.job_type, o.customer.name, o.postcode, s.status,
+                        o.parcels, o.pallet_count, o.scanned_count, o.price,
+                        s.completed_at.strftime("%Y-%m-%d %H:%M") if s.completed_at else ""])
+        out = buf.getvalue()
+        return app.response_class(out, mimetype="text/csv", headers={
+            "Content-Disposition": "attachment; filename=helioops_kpi_export.csv"})
+
+    @app.route("/admin/backup")
+    @login_required("admin")
+    def admin_backup():
+        """Download a full JSON snapshot of the operational data."""
+        import json
+        snapshot = {"generated": datetime.utcnow().isoformat()}
+        for name, model in [("customers", Customer), ("drivers", Driver),
+                            ("vehicles", Vehicle), ("orders", Order),
+                            ("items", Item), ("routes", Route), ("stops", Stop),
+                            ("scans", Scan), ("sms_log", SmsLog)]:
+            rows = []
+            for r in model.query.all():
+                d = {c.name: getattr(r, c.name) for c in r.__table__.columns
+                     if c.name not in ("photo", "signature")}
+                for kk, vv in d.items():
+                    if isinstance(vv, (datetime, date)):
+                        d[kk] = vv.isoformat()
+                rows.append(d)
+            snapshot[name] = rows
+        payload = json.dumps(snapshot, indent=2, default=str)
+        stamp = datetime.utcnow().strftime("%Y%m%d-%H%M")
+        return app.response_class(payload, mimetype="application/json", headers={
+            "Content-Disposition": f"attachment; filename=helioops_backup_{stamp}.json"})
+
+    @app.route("/messages")
+    @login_required("admin", "dispatcher")
+    def messages():
+        logs = SmsLog.query.order_by(SmsLog.created_at.desc()).limit(200).all()
+        return render_template("messages.html", logs=logs)
+
+    # ---- pending work control board ----
+    @app.route("/pending")
+    @login_required("admin", "dispatcher")
+    def pending_board():
+        view = request.args.get("view", "status")
+        active = [o for o in Order.query
+                  .order_by(Order.collection_date, Order.created_at).all()
+                  if o.status not in ("delivered", "collected", "failed")]
+        collections = [o for o in active if o.job_type == "collection"]
+        deliveries = [o for o in active if o.job_type == "delivery"]
+
+        def totals(lst):
+            return {"jobs": len(lst),
+                    "pallets": sum(o.pallet_count for o in lst),
+                    "parcels": sum(o.parcels for o in lst)}
+
+        drivers = Driver.query.filter_by(active=True).all()
+        vehicles = Vehicle.query.filter_by(active=True).all()
+        slamap = {o.id: sla_for(o) for o in active}
+
+        groups = None
+        if view == "resource":
+            groups = [("Unallocated", [o for o in active if not o.assigned_driver_id])]
+            for d in drivers:
+                groups.append((d.user.name if d.user else "Driver",
+                               [o for o in active if o.assigned_driver_id == d.id]))
+
+        tmpl = "pending_fragment.html" if request.args.get("fragment") else "pending_board.html"
+        return render_template(tmpl, view=view, collections=collections,
+                               deliveries=deliveries, col_tot=totals(collections),
+                               del_tot=totals(deliveries), drivers=drivers,
+                               vehicles=vehicles, sla=slamap, groups=groups)
+
+    @app.route("/pending/<int:oid>/allocate", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def pending_allocate(oid):
+        o = db.session.get(Order, oid) or abort(404)
+        did = request.form.get("driver_id")
+        vid = request.form.get("vehicle_id")
+        o.assigned_driver_id = int(did) if did else None
+        o.assigned_vehicle_id = int(vid) if vid else None
+        if o.assigned_driver_id or o.assigned_vehicle_id:
+            if o.status == "unassigned":
+                o.status = "assigned"
+        elif o.status == "assigned":
+            o.status = "unassigned"
+        warn = None
+        if o.assigned_vehicle and o.pallet_count > (o.assigned_vehicle.capacity_pallets or 0):
+            warn = (f"{o.assigned_vehicle.reg} holds "
+                    f"{o.assigned_vehicle.capacity_pallets} pallets but {o.ref} "
+                    f"has {o.pallet_count}.")
+        db.session.commit()
+        flash(warn, "error") if warn else flash(f"{o.ref} allocated.", "ok")
+        return redirect(request.referrer or url_for("pending_board"))
+
+    @app.route("/pending/<int:oid>/suggest", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def pending_suggest(oid):
+        o = db.session.get(Order, oid) or abort(404)
+        van = (Vehicle.query
+               .filter(Vehicle.active == True, Vehicle.status == "available",
+                       Vehicle.capacity_pallets >= max(o.pallet_count, 1))
+               .order_by(Vehicle.capacity_pallets.asc()).first())
+        drv = Driver.query.filter_by(active=True, status="available").first()
+        if van:
+            o.assigned_vehicle_id = van.id
+        if drv:
+            o.assigned_driver_id = drv.id
+        if (van or drv) and o.status == "unassigned":
+            o.status = "assigned"
+        db.session.commit()
+        if van or drv:
+            picks = ", ".join(filter(None, [van.reg if van else None,
+                              (drv.user.name if drv and drv.user else None)]))
+            flash(f"Suggested for {o.ref}: {picks}.", "ok")
+        else:
+            flash("No available van/driver to suggest.", "error")
+        return redirect(request.referrer or url_for("pending_board"))
+
+    @app.route("/orders/<int:oid>")
+    @login_required("admin", "dispatcher")
+    def order_detail(oid):
+        o = db.session.get(Order, oid) or abort(404)
+        return render_template("order_detail.html", o=o,
+                               drivers=Driver.query.filter_by(active=True).all(),
+                               vehicles=Vehicle.query.filter_by(active=True).all(),
+                               all_surcharges=Surcharge.query.filter_by(active=True).all(),
+                               sla=sla_for(o))
+
+    # ---- resource table ----
+    @app.route("/resources")
+    @login_required("admin", "dispatcher")
+    def resources():
+        drivers = Driver.query.all()
+        alloc = {}
+        for d in drivers:
+            alloc[d.id] = [o for o in Order.query.filter_by(assigned_driver_id=d.id).all()
+                           if o.status not in ("delivered", "collected", "failed")]
+        return render_template("resources.html", drivers=drivers,
+                               vehicles=Vehicle.query.all(), alloc=alloc)
+
+    @app.route("/resources/vehicle/<int:vid>/status", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def vehicle_status(vid):
+        v = db.session.get(Vehicle, vid) or abort(404)
+        v.status = request.form.get("status", "available")
+        db.session.commit()
+        return redirect(url_for("resources"))
+
+    @app.route("/resources/driver/<int:did>/status", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def driver_status(did):
+        d = db.session.get(Driver, did) or abort(404)
+        d.status = request.form.get("status", "available")
+        db.session.commit()
+        return redirect(url_for("resources"))
+
+    # ---- surcharge catalogue ----
+    @app.route("/surcharges", methods=["GET", "POST"])
+    @login_required("admin", "dispatcher")
+    def surcharges():
+        if request.method == "POST":
+            sc = Surcharge(
+                code=request.form["code"].upper().strip(),
+                name=request.form["name"],
+                kind=request.form.get("kind", "flat"),
+                amount=float(request.form.get("amount") or 0),
             )
-            db.session.add(invoice)
-            db.session.flush()
-            for o in order_list:
-                o.invoiced = True
-                o.invoice_id = invoice.id
-            created += 1
+            db.session.add(sc)
+            db.session.commit()
+            flash("Surcharge added.", "ok")
+            return redirect(url_for("surcharges"))
+        return render_template("surcharges.html",
+                               surcharges=Surcharge.query.order_by(Surcharge.name).all())
 
+    @app.route("/surcharges/<int:sid>/update", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def surcharge_update(sid):
+        sc = db.session.get(Surcharge, sid) or abort(404)
+        sc.amount = float(request.form.get("amount") or 0)
+        sc.active = request.form.get("active") == "on"
         db.session.commit()
-        flash(f"Generated {created} invoice(s) from {len(completed)} completed order(s).", "success")
-        return redirect(url_for("invoices_list"))
+        flash("Surcharge updated.", "ok")
+        return redirect(url_for("surcharges"))
 
-    @app.route("/invoices/<int:invoice_id>")
-    @login_required
-    def invoice_detail(invoice_id):
-        require_role("admin", "dispatcher")
-        invoice = Invoice.query.get_or_404(invoice_id)
-        return render_template("invoice_detail.html", invoice=invoice)
-
-    @app.route("/invoices/<int:invoice_id>/status", methods=["POST"])
-    @login_required
-    def invoice_set_status(invoice_id):
-        require_role("admin", "dispatcher")
-        invoice = Invoice.query.get_or_404(invoice_id)
-        invoice.status = request.form["status"]
+    @app.route("/orders/<int:oid>/surcharges", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def order_apply_surcharges(oid):
+        o = db.session.get(Order, oid) or abort(404)
+        ids = [int(x) for x in request.form.getlist("surcharge_ids")]
+        o.surcharges = Surcharge.query.filter(Surcharge.id.in_(ids)).all() if ids else []
         db.session.commit()
-        return redirect(url_for("invoice_detail", invoice_id=invoice.id))
+        flash("Surcharges updated for the shipment.", "ok")
+        return redirect(request.referrer or url_for("orders"))
 
-    # -----------------------------------------------------------------
-    # KPI dashboard & reporting
-    # -----------------------------------------------------------------
+    # ---- invoicing ----
+    @app.route("/invoices")
+    @login_required("admin", "dispatcher")
+    def invoices():
+        inv = Invoice.query.order_by(Invoice.created_at.desc()).all()
+        return render_template("invoices.html", invoices=inv)
 
-    @app.route("/kpi")
-    @login_required
-    def kpi_dashboard():
-        require_role("admin", "dispatcher")
-        period = request.args.get("period", "7")
-        days = int(period)
-        since = datetime.utcnow() - timedelta(days=days)
-        orders = Order.query.filter(Order.created_at >= since).all()
+    @app.route("/invoices/run", methods=["GET", "POST"])
+    @login_required("admin", "dispatcher")
+    def invoice_run():
+        from datetime import timedelta
+        if request.method == "POST":
+            # default period = the most recent complete week (Mon-Sun)
+            if request.form.get("period_start"):
+                start = datetime.strptime(request.form["period_start"], "%Y-%m-%d").date()
+            else:
+                today = date.today()
+                start = today - timedelta(days=today.weekday() + 7)
+            end = start + timedelta(days=6)
+            made = 0
+            cust_ids = request.form.getlist("customer_ids")
+            custs = (Customer.query.filter(Customer.id.in_([int(c) for c in cust_ids]))
+                     if cust_ids else Customer.query).all()
+            for c in custs:
+                inv = generate_invoice(c, start, end)
+                if inv:
+                    made += 1
+            db.session.commit()
+            flash(f"Invoice run complete for {start:%d %b}–{end:%d %b} — "
+                  f"{made} invoice(s) created.", "ok")
+            return redirect(url_for("invoices"))
+        return render_template("invoice_run.html",
+                               customers=Customer.query.order_by(Customer.name).all())
 
-        total_pallets = sum(o.pallets or 0 for o in orders)
-        total_parcels = sum(o.parcels or 0 for o in orders)
-        deliveries = [o for o in orders if o.job_type == "delivery"]
-        collections = [o for o in orders if o.job_type == "collection"]
-        delivered = [o for o in orders if o.status in ("delivered", "collected")]
-        failed = [o for o in orders if o.status == "failed"]
-        success_rate = round(len(delivered) / len(orders) * 100, 1) if orders else 0.0
-        difot = round(len([o for o in delivered if not o.pod or not o.pod.exception_reason]) /
-                       len(delivered) * 100, 1) if delivered else 0.0
+    @app.route("/invoices/<int:iid>")
+    @login_required("admin", "dispatcher")
+    def invoice_detail(iid):
+        inv = db.session.get(Invoice, iid) or abort(404)
+        return render_template("invoice_detail.html", inv=inv, host=request.host_url)
 
-        per_driver = {}
-        for o in orders:
-            if not o.driver:
-                continue
-            key = o.driver.name
-            per_driver.setdefault(key, {"jobs": 0, "delivered": 0, "failed": 0, "pallets": 0})
-            per_driver[key]["jobs"] += 1
-            per_driver[key]["pallets"] += o.pallets or 0
-            if o.status in ("delivered", "collected"):
-                per_driver[key]["delivered"] += 1
-            elif o.status == "failed":
-                per_driver[key]["failed"] += 1
+    @app.route("/invoices/<int:iid>/status", methods=["POST"])
+    @login_required("admin", "dispatcher")
+    def invoice_status(iid):
+        inv = db.session.get(Invoice, iid) or abort(404)
+        inv.status = request.form.get("status", inv.status)
+        db.session.commit()
+        flash(f"Invoice marked {inv.status}.", "ok")
+        return redirect(url_for("invoice_detail", iid=iid))
 
-        return render_template("kpi.html", period=period, total_pallets=total_pallets,
-                                total_parcels=total_parcels, deliveries=len(deliveries),
-                                collections=len(collections), success_rate=success_rate,
-                                difot=difot, per_driver=per_driver, total_jobs=len(orders),
-                                failed_count=len(failed))
+    # ---- barcode labels (4x4) ----
+    @app.route("/orders/<int:oid>/label")
+    @login_required("admin", "dispatcher", "driver")
+    def order_label(oid):
+        o = db.session.get(Order, oid) or abort(404)
+        return render_template("label.html", o=o)
 
-    @app.route("/kpi/export.csv")
-    @login_required
-    def kpi_export():
-        require_role("admin", "dispatcher")
-        period = request.args.get("period", "7")
-        since = datetime.utcnow() - timedelta(days=int(period))
-        orders = Order.query.filter(Order.created_at >= since).order_by(Order.created_at).all()
-
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["Reference", "Customer", "Job Type", "Status", "Driver", "Pallets",
-                          "Parcels", "Postcode", "Created", "Delivered/Failed At"])
-        for o in orders:
-            writer.writerow([
-                o.reference, o.customer.name if o.customer else "", o.job_type, o.status,
-                o.driver.name if o.driver else "", o.pallets, o.parcels, o.delivery_postcode,
-                o.created_at.strftime("%Y-%m-%d %H:%M"),
-                o.updated_at.strftime("%Y-%m-%d %H:%M") if o.status in ("delivered", "collected", "failed") else "",
-            ])
-        return Response(buf.getvalue(), mimetype="text/csv",
-                         headers={"Content-Disposition": "attachment; filename=hoya_kpi_export.csv"})
-
-    # -----------------------------------------------------------------
-    # Standalone scanner & help
-    # -----------------------------------------------------------------
-
+    # ---- standalone scanner module ----
     @app.route("/scan")
-    @login_required
-    def scan_standalone():
-        return render_template("scan.html")
+    @login_required("admin", "dispatcher", "driver")
+    def scan_module():
+        return render_template("scan_module.html")
 
-    @app.route("/scan/lookup", methods=["POST"])
-    @login_required
-    def scan_lookup():
-        code = request.form.get("barcode", "").strip()
-        box = OrderBox.query.filter_by(barcode=code).first()
-        if not box:
-            return jsonify({"ok": False, "message": "Unknown barcode."})
-        return jsonify({"ok": True, "order_reference": box.order.reference,
-                         "order_id": box.order_id, "kind": box.kind,
-                         "scanned": box.scanned, "customer": box.order.customer.name})
+    @app.route("/api/lookup")
+    @login_required("admin", "dispatcher", "driver")
+    def api_lookup():
+        code = (request.args.get("barcode") or "").strip()
+        item = Item.query.filter_by(barcode=code).first()
+        o = item.order if item else Order.query.filter_by(ref=code).first()
+        if not o:
+            return jsonify(found=False)
+        return jsonify(found=True, ref=o.ref, customer=o.customer.name,
+                       job=o.job_type, status=o.status,
+                       delivery=o.delivery_address, delivery_pc=o.delivery_postcode,
+                       pallets=o.pallet_count, parcels=o.parcels,
+                       weight=o.weight_kg, kind=(item.kind if item else None))
 
-    @app.route("/help")
-    @login_required
-    def help_page():
-        role = current_user.role
-        return render_template("help.html", role=role)
+    # ---- public POD image by shipment ref (for invoice hyperlinks) ----
+    @app.route("/pod/ref/<ref>")
+    def pod_by_ref(ref):
+        o = Order.query.filter_by(ref=ref).first() or abort(404)
+        if o.pod and o.pod.photo:
+            return send_file(io.BytesIO(o.pod.photo),
+                             mimetype=o.pod.photo_mime or "image/jpeg")
+        abort(404)
+
+    # ---- PWA plumbing ----
+    @app.route("/healthz")
+    def healthz():
+        try:
+            db.session.execute(db.text("SELECT 1"))
+            return {"status": "ok"}, 200
+        except Exception:
+            return {"status": "degraded"}, 503
+
+    @app.route("/static/<path:filename>", endpoint="static")
+    def static_files(filename):
+        p = find_asset(filename)
+        if not p:
+            abort(404)
+        return send_file(p)
+
+    @app.route("/manifest.webmanifest")
+    def manifest():
+        p = find_asset("manifest.json")
+        return send_file(p) if p else ("", 404)
+
+    @app.route("/sw.js")
+    def service_worker():
+        p = find_asset("sw.js")
+        if not p:
+            return ("", 404)
+        resp = app.make_response(send_file(p))
+        resp.headers["Content-Type"] = "application/javascript"
+        return resp
+
+    @app.errorhandler(403)
+    def forbidden(e):
+        return render_template("error.html", code=403,
+                               msg="You don't have access to that page."), 403
+
+    @app.errorhandler(404)
+    def notfound(e):
+        return render_template("error.html", code=404,
+                               msg="That page or record wasn't found."), 404
 
 
-# ---------------------------------------------------------------------------
-# Seed data
-# ---------------------------------------------------------------------------
+def _sequence_route(r):
+    ordered, miles = optimise_sequence(r.stops, r.start_postcode)
+    for i, s in enumerate(ordered, start=1):
+        s.sequence = i
+    return miles
 
-def seed_if_needed():
-    if RateSettings.query.first() is None:
-        db.session.add(RateSettings())
 
-    if Zone.query.count() == 0:
-        default_zones = [
-            ("London & South East", "E,EC,N,NW,SE,SW,W,WC,BR,CR,DA,EN,HA,IG,KT,RM,SM,TW,UB,WD,GU,RG,SL,MK,LU,AL", 1.2),
-            ("Midlands", "B,CV,DE,LE,NG,NN,ST,WR,WS,WV,OX", 1.0),
-            ("North West", "M,L,WA,PR,BB,BL,OL,SK,CH,WN,LA", 1.0),
-            ("Yorkshire & North East", "LS,S,BD,HD,HX,WF,YO,HU,DN,NE,SR,DH,TS,DL", 1.05),
-            ("Scotland", "EH,G,KA,PA,ML,FK,DD,AB,IV,KY,TD,DG", 1.35),
-            ("Wales", "CF,NP,LD,SY,LL,SA", 1.25),
-            ("South West", "BS,GL,HR,PL,EX,TR,SN", 1.15),
-            ("East of England", "IP,CO,SS,CM,CB,NR,PE", 1.1),
-        ]
-        for name, prefixes, mult in default_zones:
-            db.session.add(Zone(name=name, outward_prefixes=prefixes, multiplier=mult))
-
-    if Surcharge.query.count() == 0:
-        default_surcharges = [
-            ("Residential delivery", 5.0, False), ("Tail lift required", 15.0, False),
-            ("Timed delivery slot", 10.0, False), ("Weekend delivery", 20.0, False),
-            ("Fragile / high value", 8.0, False), ("Long carry (>20m)", 6.0, False),
-            ("Two-person handling", 18.0, False), ("Redelivery", 12.0, False),
-            ("Storage per day", 4.0, False), ("Failed collection re-attempt", 10.0, False),
-        ]
-        for name, amount, is_pct in default_surcharges:
-            db.session.add(Surcharge(name=name, default_amount=amount, is_percent=is_pct))
-
-    db.session.commit()
-
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@heliolink.co")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "Heliolink26")
+# --------------------------------------------------------------------------
+#  Seed data (first run only)
+# --------------------------------------------------------------------------
+def seed_if_empty():
+    # Always ensure an admin login exists. In production set ADMIN_EMAIL and
+    # ADMIN_PASSWORD as environment variables so you never go live on defaults.
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@heliolink.co").strip().lower()
     if not User.query.filter_by(email=admin_email).first():
-        admin = User(email=admin_email, name="Admin", role="admin")
-        admin.set_password(admin_password)
+        admin = User(name=os.environ.get("ADMIN_NAME", "Administrator"),
+                     email=admin_email, role="admin")
+        admin.set_password(os.environ.get("ADMIN_PASSWORD", "Heliolink26"))
         db.session.add(admin)
         db.session.commit()
-        print(f"[seed] Admin login created: {admin_email} / {admin_password}")
 
-    if os.environ.get("SEED_DEMO", "true").lower() == "true" and Customer.query.count() == 0:
-        _seed_demo_data()
-
-
-def _seed_demo_data():
-    c1 = Customer(name="Williams Handbaked", email="ops@williamshandbaked.co.uk", phone="01204 555111",
-                   billing_address="Unit 4, Bakery Park, Bolton", pricing_mode="standard", discount_pct=10)
-    c2 = Customer(name="Fairgreen International School", email="logistics@fairgreen.edu", phone="0161 555222",
-                   billing_address="Fairgreen Campus, Manchester", pricing_mode="flat", flat_rate_per_pallet=22)
-    db.session.add_all([c1, c2])
+    # Standard rate settings + region zones — config, seeded once (always).
+    if not db.session.get(RateSettings, 1):
+        db.session.add(RateSettings(id=1))
+    if not Zone.query.first():
+        for reg in REGIONS:
+            db.session.add(Zone(region=reg, multiplier=1.0))
     db.session.commit()
 
-    portal_user = User(email="ops@williamshandbaked.co.uk", name="Williams Handbaked", role="customer",
-                        customer_id=c1.id)
-    portal_user.set_password("customer123")
-    db.session.add(portal_user)
+    # Standard industry surcharge catalogue — seeded once, config not demo data.
+    if not Surcharge.query.first():
+        catalogue = [
+            ("FUEL", "Fuel surcharge (variable)", "percent", 15.0),
+            ("TAIL", "Tail-lift delivery", "flat", 12.50),
+            ("TIMED", "Timed / booked delivery", "flat", 15.00),
+            ("REMOTE", "Remote / offshore area", "per_pallet", 8.00),
+            ("WAIT", "Waiting time (per 15 min)", "flat", 7.50),
+            ("REDEL", "Re-delivery / failed attempt", "flat", 18.00),
+            ("HAZ", "Hazardous / ADR goods", "per_pallet", 10.00),
+            ("OOG", "Out-of-gauge / oversize", "per_pallet", 14.00),
+            ("MANUAL", "Manual handling / no equipment", "flat", 9.00),
+            ("SAT", "Saturday delivery", "flat", 20.00),
+        ]
+        for code, name, kind, amt in catalogue:
+            db.session.add(Surcharge(code=code, name=name, kind=kind, amount=amt))
+        db.session.commit()
 
-    v1 = Vehicle(registration="HY17 ABC", size="panel_van", capacity_pallets=4, mpg=34, status="available")
-    v2 = Vehicle(registration="HY18 DEF", size="2.5t", capacity_pallets=8, mpg=22, status="available")
-    v3 = Vehicle(registration="HY19 GHI", size="7.5t", capacity_pallets=16, mpg=14, status="off_road")
+    # Demo data (sample drivers, vehicles, customers, orders) is only created
+    # when SEED_DEMO is not "false". Set SEED_DEMO=false for a clean go-live.
+    if os.environ.get("SEED_DEMO", "true").lower() == "false":
+        return
+    if Customer.query.first():   # demo already seeded
+        return
+
+    disp = User(name="Dispatch Desk", email="dispatch@heliolink.co", role="dispatcher")
+    disp.set_password("Heliolink26")
+    db.session.add(disp)
+    db.session.flush()
+
+    d1u = User(name="John Driver", email="john@heliolink.co", role="driver", phone="07700900001")
+    d1u.set_password("driver123")
+    d2u = User(name="Sam Wheeler", email="sam@heliolink.co", role="driver", phone="07700900002")
+    d2u.set_password("driver123")
+    db.session.add_all([d1u, d2u])
+    db.session.flush()
+    d1 = Driver(user=d1u, phone=d1u.phone, licence_no="SALEH061")
+    d2 = Driver(user=d2u, phone=d2u.phone, licence_no="WHEEL022")
+    db.session.add_all([d1, d2])
+
+    v1 = Vehicle(reg="PR21 HLK", make_model="Ford Transit", vtype="panel van", capacity_pallets=2, mpg=30)
+    v2 = Vehicle(reg="PR71 HLK", make_model="Mercedes Sprinter", vtype="2.5t", capacity_pallets=4, mpg=22)
+    v3 = Vehicle(reg="PR22 HLK", make_model="DAF LF", vtype="7.5t", capacity_pallets=10, mpg=14)
     db.session.add_all([v1, v2, v3])
-    db.session.commit()
 
-    d1 = Driver(name="Jamie Ellis", phone="07700 900123", pin="1111", status="available",
-                current_vehicle_id=v1.id)
-    d2 = Driver(name="Priya Anand", phone="07700 900456", pin="2222", status="available",
-                current_vehicle_id=v2.id)
-    d3 = Driver(name="Marcus Reid", phone="07700 900789", pin="3333", status="off",
-                current_vehicle_id=v3.id)
-    db.session.add_all([d1, d2, d3])
-    db.session.commit()
+    c1 = Customer(name="ESOL Trading Ltd", contact_name="Maria", email="ops@esol.example",
+                  phone="07700900100", address="Unit 4, Docklands", postcode="L20 8DB",
+                  rate_base=8.0, rate_per_mile=0.55, rate_per_pallet=6.0,
+                  rate_per_kg=0.02, min_charge=15.0, fuel_surcharge_pct=15.0,
+                  portal_code="ESOL2026")
+    c2 = Customer(name="Williams Bakery", contact_name="Tom", email="tom@williams.example",
+                  phone="07700900101", address="Moor Lane", postcode="M8 4PX",
+                  rate_base=6.0, rate_per_mile=0.50, rate_per_pallet=5.0,
+                  rate_per_kg=0.0, min_charge=12.0, fuel_surcharge_pct=15.0,
+                  portal_code="WILL2026")
+    c3 = Customer(name="ETD Logistics", contact_name="Priya", email="hub@etd.example",
+                  phone="07700900102", address="Ashton Ind Est", postcode="ST4 8JG",
+                  rate_base=10.0, rate_per_mile=0.60, rate_per_pallet=7.0,
+                  rate_per_kg=0.03, min_charge=18.0, fuel_surcharge_pct=15.0,
+                  portal_code="ETD2026")
+    db.session.add_all([c1, c2, c3])
+    db.session.flush()
 
-    settings = RateSettings.query.first()
-    zones = Zone.query.all()
-
-    sample_orders = [
-        (c1.id, "delivery", "45 Camden High St, London", "NW1 7JR", "Alice Turner", "standard", 2, 0),
-        (c1.id, "delivery", "9 Islington Green, London", "N1 2XH", "Ben Hughes", "same_day", 1, 3),
-        (c2.id, "delivery", "78 Deansgate, Manchester", "M3 2FW", "Chloe Adams", "48h", 3, 0),
-        (c2.id, "collection", "22 Portland St, Manchester", "M1 4GX", "Daniel Foster", "48h", 1, 5),
-        (c1.id, "delivery", "12 Corporation St, Birmingham", "B2 4LP", "Emma Clarke", "48h", 4, 0),
+    # (customer, recipient, phone, postcode, parcels, pallets, job_type, weight)
+    demo = [
+        (c1, "Northern Foods", "07700900201", "CH64 8TF", 4, 2, "delivery", 480),
+        (c1, "Wirral Depot", "07700900202", "CH66 1QW", 2, 1, "delivery", 220),
+        (c2, "Congleton Store", "07700900203", "CW12 4RL", 0, 3, "delivery", 640),
+        (c2, "Stoke Central", "07700900204", "ST4 8JG", 6, 0, "delivery", 90),
+        (c3, "Matlock Yard", "07700900205", "DE4 5FR", 3, 2, "collection", 510),
+        (c3, "Derby Hub", "07700900206", "DE21 5DB", 2, 1, "delivery", 260),
     ]
-    for customer_id, job_type, address, postcode, contact, timing, pallets, parcels in sample_orders:
-        order = Order(
-            reference=gen_reference(), customer_id=customer_id, job_type=job_type,
-            delivery_address=address, delivery_postcode=postcode,
-            collection_address="Hoya Depot, Trafford Park, Manchester", collection_postcode=DEPOT_POSTCODE,
-            contact_name=contact, contact_phone="07911 000000", pallets=pallets, parcels=parcels,
-            weight_per_pallet_kg=180, timing=timing, delivery_date=date.today() + timedelta(days=1),
-        )
-        db.session.add(order)
+    for cust, recip, phone, pc, parc, pal, jt, wt in demo:
+        o = Order(ref=next_ref("HL", Order, "ref"), customer=cust, recipient=recip,
+                  phone=phone, address=recip, postcode=pc, pallets=pal,
+                  weight_kg=wt, job_type=jt, service="next-day")
+        set_legs(o, cust, jt, recip, pc)
+        o.collection_date = date.today()
+        o.collection_time = "09:00"
+        o.timing = "48h" if jt == "delivery" else "same-day"
+        o.delivery_date = date.today() + (timedelta(days=2) if jt == "delivery" else timedelta(0))
+        o.price = quote_order(cust, pc, pal, wt)
+        db.session.add(o)
         db.session.flush()
-        db.session.add(OrderEvent(order_id=order.id, status="pending", note="Order created (seed)"))
-        for i in range(1, pallets + 1):
-            db.session.add(OrderBox(order_id=order.id, kind="pallet", label_index=i,
-                                     barcode=gen_barcode(order.reference, "pallet", i)))
-        for i in range(1, parcels + 1):
-            db.session.add(OrderBox(order_id=order.id, kind="parcel", label_index=i,
-                                     barcode=gen_barcode(order.reference, "parcel", i)))
-        customer = Customer.query.get(customer_id)
-        try:
-            order.quoted_price = quote_order(order, customer, settings, zones, DEPOT_POSTCODE)
-        except Exception:
-            order.quoted_price = 45.0
+        build_items(o, parc, pal)
+
     db.session.commit()
-    print("[seed] Demo customers, fleet, drivers and orders created.")
 
 
 app = create_app()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    debug = os.environ.get("FLASK_DEBUG", "true").lower() == "true"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(host="0.0.0.0", port=port, debug=True)

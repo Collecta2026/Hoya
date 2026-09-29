@@ -13,6 +13,20 @@
   <div class="col-md-3"><a class="btn btn-outline-primary w-100 py-3" href="{{ url_for('pending_board') }}"><i class="bi bi-kanban"></i> Pending Work Board</a></div>
   <div class="col-md-3"><a class="btn btn-outline-primary w-100 py-3" href="{{ url_for('kpi_dashboard') }}"><i class="bi bi-graph-up"></i> Insights</a></div>
 </div>
+{% if recent_pods %}
+<div class="card p-3 mb-4">
+  <h5>Recent proof of delivery</h5>
+  <div class="d-flex flex-wrap gap-3">
+    {% for pod in recent_pods %}
+    <a href="{{ url_for('order_detail', order_id=pod.order_id) }}" class="text-decoration-none text-dark" style="width:140px">
+      <img src="{{ pod.photo_data_url }}" class="img-fluid rounded border" style="height:100px;width:140px;object-fit:cover">
+      <div class="small mt-1">{{ pod.order.reference }}</div>
+      <div class="text-muted small">{{ pod.recipient_name or 'Recipient not recorded' }} &middot; {{ pod.delivered_at.strftime('%d %b %H:%M') }}</div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 <div class="card p-3">
   <h5>Recent orders</h5>
   <table class="table table-sm">

@@ -6,7 +6,7 @@
     <div class="card p-3">
       <h5>Drivers</h5>
       <table class="table table-sm">
-        <thead><tr><th>Name</th><th>Phone</th><th>PIN</th><th>Van</th><th>Status</th></tr></thead>
+        <thead><tr><th>Name</th><th>Phone</th><th>PIN</th><th>Van</th><th>Status</th><th></th></tr></thead>
         <tbody>
         {% for d in drivers %}
         <tr>
@@ -19,6 +19,12 @@
                 <option value="on_route" {% if d.status=='on_route' %}selected{% endif %}>On Route</option>
                 <option value="off" {% if d.status=='off' %}selected{% endif %}>Off</option>
               </select>
+            </form>
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('driver_delete', driver_id=d.id) }}"
+                  onsubmit="return confirm('Remove {{ d.name }}? Their login will be removed too. Any active jobs must be reassigned first.');">
+              <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
             </form>
           </td>
         </tr>
@@ -37,7 +43,7 @@
     <div class="card p-3">
       <h5>Vehicles</h5>
       <table class="table table-sm">
-        <thead><tr><th>Reg</th><th>Size</th><th>Capacity</th><th>Status</th></tr></thead>
+        <thead><tr><th>Reg</th><th>Size</th><th>Capacity</th><th>Status</th><th></th></tr></thead>
         <tbody>
         {% for v in vehicles %}
         <tr>
@@ -49,6 +55,12 @@
                 <option value="on_route" {% if v.status=='on_route' %}selected{% endif %}>On Route</option>
                 <option value="off_road" {% if v.status=='off_road' %}selected{% endif %}>Off Road</option>
               </select>
+            </form>
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('vehicle_delete', vehicle_id=v.id) }}"
+                  onsubmit="return confirm('Remove {{ v.registration }}? Any active jobs must be reassigned first.');">
+              <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
             </form>
           </td>
         </tr>

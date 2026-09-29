@@ -6,6 +6,8 @@ body { font-family: Arial, sans-serif; }
 .label { width: 4in; height: 4in; border: 2px solid #000; padding: 10px; margin: 10px; display: inline-block; box-sizing: border-box; }
 .label h4 { margin: 4px 0; }
 .label .meta { font-size: 13px; }
+.label { overflow: hidden; }
+.barcode { max-width: 100%; height: auto; display: block; }
 @media print { .no-print { display: none; } }
 </style>
 </head>
@@ -16,13 +18,13 @@ body { font-family: Arial, sans-serif; }
   <h4>{{ order.reference }}</h4>
   <div class="meta"><b>Deliver to:</b><br>{{ order.delivery_address }}<br>{{ order.delivery_postcode }}</div>
   <div class="meta">{{ b.kind|capitalize }} {{ b.label_index }} &middot; Pallets: {{ order.pallets }} &middot; Weight/pallet: {{ order.weight_per_pallet_kg }}kg &middot; Total: {{ order.total_weight_kg }}kg</div>
-  <svg class="barcode" jsbarcode-value="{{ b.barcode }}" jsbarcode-height="60"></svg>
+  <svg class="barcode" jsbarcode-value="{{ b.barcode }}" jsbarcode-height="55" jsbarcode-width="1" jsbarcode-fontsize="11" jsbarcode-margin="0"></svg>
 </div>
 {% else %}
 <div class="label">
   <h4>{{ order.reference }}</h4>
   <div class="meta">{{ order.delivery_address }}<br>{{ order.delivery_postcode }}</div>
-  <svg class="barcode" jsbarcode-value="{{ order.reference }}" jsbarcode-height="60"></svg>
+  <svg class="barcode" jsbarcode-value="{{ order.reference }}" jsbarcode-height="55" jsbarcode-width="1.5" jsbarcode-fontsize="12" jsbarcode-margin="0"></svg>
 </div>
 {% endfor %}
 <script>JsBarcode(".barcode").init();</script>

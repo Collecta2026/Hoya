@@ -260,10 +260,16 @@ def register_routes(app):
         available_drivers = Driver.query.filter_by(status="available").count()
         available_vans = Vehicle.query.filter_by(status="available").count()
         recent = Order.query.order_by(Order.created_at.desc()).limit(8).all()
+        recent_pods = (
+            ProofOfDelivery.query.filter(ProofOfDelivery.photo_data_url.isnot(None))
+            .order_by(ProofOfDelivery.delivered_at.desc())
+            .limit(8)
+            .all()
+        )
         return render_template("dashboard.html", active_count=active_count,
                                 delivered_today=delivered_today, failed_count=failed_count,
                                 available_drivers=available_drivers, available_vans=available_vans,
-                                recent=recent)
+                                recent=recent, recent_pods=recent_pods)
 
     # -----------------------------------------------------------------
     # Dispatcher: orders / dispatch board
@@ -470,6 +476,50 @@ def register_routes(app):
         v.status = request.form["status"]
         db.session.commit()
         return redirect(request.referrer or url_for("fleet"))
+
+    ACTIVE_ORDER_STATUSES = ["pending", "assigned", "picked_up", "in_transit"]
+
+    @app.route("/fleet/drivers/<int:driver_id>/delete", methods=["POST"])
+    @login_required
+    def driver_delete(driver_id):
+        require_role("admin", "dispatcher")
+        driver = Driver.query.get_or_404(driver_id)
+        active = Order.query.filter(Order.driver_id == driver.id,
+                                     Order.status.in_(ACTIVE_ORDER_STATUSES)).count()
+        if active:
+            flash(f"Can't remove {driver.name} - they still have {active} active job(s). "
+                  f"Reassign or complete those first.", "error")
+            return redirect(url_for("fleet"))
+
+        # Unlink from historical orders (keep the orders, just drop the reference)
+        # rather than blocking deletion over completed/failed history.
+        Order.query.filter_by(driver_id=driver.id).update({"driver_id": None})
+        User.query.filter_by(driver_id=driver.id).delete()
+        name = driver.name
+        db.session.delete(driver)
+        db.session.commit()
+        flash(f"Removed driver {name}.", "success")
+        return redirect(url_for("fleet"))
+
+    @app.route("/fleet/vehicles/<int:vehicle_id>/delete", methods=["POST"])
+    @login_required
+    def vehicle_delete(vehicle_id):
+        require_role("admin", "dispatcher")
+        vehicle = Vehicle.query.get_or_404(vehicle_id)
+        active = Order.query.filter(Order.vehicle_id == vehicle.id,
+                                     Order.status.in_(ACTIVE_ORDER_STATUSES)).count()
+        if active:
+            flash(f"Can't remove {vehicle.registration} - it's on {active} active job(s). "
+                  f"Reassign or complete those first.", "error")
+            return redirect(url_for("fleet"))
+
+        Order.query.filter_by(vehicle_id=vehicle.id).update({"vehicle_id": None})
+        Driver.query.filter_by(current_vehicle_id=vehicle.id).update({"current_vehicle_id": None})
+        reg = vehicle.registration
+        db.session.delete(vehicle)
+        db.session.commit()
+        flash(f"Removed vehicle {reg}.", "success")
+        return redirect(url_for("fleet"))
 
     # Backward/alt naming used by the resources page toggles
     @app.route("/resources")

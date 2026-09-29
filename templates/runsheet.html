@@ -7,6 +7,7 @@ h1 { font-size: 20px; margin-bottom: 2px; }
 .meta { color: #555; margin-bottom: 16px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; vertical-align: top; }
+.barcode { max-width: 140px; height: auto; display: block; }
 th { background: #eee; }
 .no-print { margin-bottom: 12px; }
 @media print { .no-print { display: none; } }
@@ -30,7 +31,7 @@ th { background: #eee; }
   <td>{{ o.delivery_address if o.job_type=='delivery' else o.collection_address }}<br>{{ o.delivery_postcode if o.job_type=='delivery' else o.collection_postcode }}</td>
   <td>{{ o.pallets }}p / {{ o.parcels }}pc</td>
   <td>{% if o.cod_amount %}£{{ '%.2f'|format(o.cod_amount) }}{% if o.cod_collected %} ✓{% endif %}{% else %}—{% endif %}</td>
-  <td><svg class="barcode" jsbarcode-value="{{ o.reference }}" jsbarcode-height="30" jsbarcode-fontsize="10"></svg></td>
+  <td><svg class="barcode" jsbarcode-value="{{ o.reference }}" jsbarcode-height="30" jsbarcode-width="1" jsbarcode-fontsize="9" jsbarcode-margin="0"></svg></td>
   <td>{{ o.status }}</td>
   <td style="min-width:140px"></td>
 </tr>

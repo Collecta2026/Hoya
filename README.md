@@ -139,6 +139,8 @@ prebuilt wheel yet. `runtime.txt` and `.python-version` pin the build to
 | Customer notifications (SMS on status change) | ✅ Twilio, with a log-only fallback when not configured |
 | Customer self-service portal (place/track orders, invoices) | ✅ Portal login, order placement, tracking, invoices |
 | Zone-based / automated job assignment | ✅ Pending Work Board's "Suggest" (smallest fitting van + free driver) |
+| Manage/remove drivers & vehicles | ✅ Fleet page - remove is blocked while a driver/van has an active job, historical orders keep their record but are unlinked |
+| POD photos visible to dispatch/admin | ✅ Dashboard shows a recent proof-of-delivery photo gallery, linking back to each order |
 | KPI reporting / exports | ✅ Insights dashboard + CSV export |
 | Live GPS tracking on a map | ⚠️ Partial — one-off "last known location" ping per stop (Google Maps link), not a continuous live-tracking map |
 | Route distances via real road network | ⚠️ Partial — straight-line distance with a routing-inefficiency correction factor, not turn-by-turn road routing (avoids needing a paid mapping API) |

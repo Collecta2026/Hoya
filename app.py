@@ -90,6 +90,55 @@ def log_event(order, status, note=None):
     db.session.add(OrderEvent(order_id=order.id, status=status, note=note))
 
 
+def apply_pod(order, form, source="driver"):
+    """Shared proof-of-delivery completion logic, used by both the driver
+    app and the public contactless-signing link. Returns the final status."""
+    exception_reason = (form.get("exception_reason") or "").strip()
+    override_missing = form.get("override_missing") == "on"
+    scanned = sum(1 for b in order.boxes if b.scanned)
+    total = len(order.boxes)
+
+    # The barcode scan gate only applies to the driver's own completion flow
+    # - a customer confirming via the contactless link has no scanner, so
+    # their signature can't be blocked on box scanning the driver should
+    # have already done.
+    if source == "driver" and total > 0 and scanned < total and not override_missing and not exception_reason:
+        return None  # caller should re-show the form with a scan-gate message
+
+    for b in order.boxes:
+        if not b.scanned:
+            b.missing = True
+
+    final_status = "failed" if exception_reason else (
+        "collected" if order.job_type == "collection" else "delivered")
+
+    pod = ProofOfDelivery.query.filter_by(order_id=order.id).first()
+    if not pod:
+        pod = ProofOfDelivery(order_id=order.id)
+        db.session.add(pod)
+    pod.recipient_name = form.get("recipient_name")
+    pod.signature_data_url = form.get("signature_data_url")
+    pod.photo_data_url = form.get("photo_data_url") or pod.photo_data_url
+    pod.notes = form.get("notes")
+    pod.exception_reason = exception_reason or None
+    pod.boxes_confirmed = scanned
+    pod.boxes_missing = total - scanned
+    pod.delivered_at = datetime.utcnow()
+
+    if form.get("cod_collected") == "on":
+        order.cod_collected = True
+
+    order.status = final_status
+    note_prefix = "Customer self-service link" if source == "customer" else "Driver app"
+    note = f"Exception: {exception_reason}" if exception_reason else (
+        f"{note_prefix}: confirmed by {pod.recipient_name or 'recipient'} ({scanned}/{total} items scanned)")
+    log_event(order, final_status, note)
+    db.session.commit()
+
+    send_sms(order.contact_phone, f"Order {order.reference}: {STATUS_LABELS.get(final_status, final_status)}.")
+    return final_status
+
+
 def require_role(*roles):
     if not current_user.is_authenticated or current_user.role not in roles:
         abort(403)
@@ -106,6 +155,14 @@ def sla_tag(order):
     if remaining.total_seconds() < 4 * 3600:
         return "amber"
     return None
+
+
+STATUSES = ["pending", "assigned", "picked_up", "in_transit", "delivered", "collected", "failed", "returned"]
+STATUS_LABELS = {
+    "pending": "Pending", "assigned": "Assigned", "picked_up": "Picked Up",
+    "in_transit": "In Transit", "delivered": "Delivered", "collected": "Collected",
+    "failed": "Failed / Exception", "returned": "Returned",
+}
 
 
 def register_routes(app):
@@ -131,6 +188,9 @@ def register_routes(app):
             password = request.form.get("password", "")
             user = User.query.filter_by(email=email).first()
             if user and user.role in ("admin", "dispatcher") and user.check_password(password):
+                if not user.active:
+                    flash("This account has been deactivated. Contact your administrator.", "error")
+                    return render_template("login.html")
                 login_user(user)
                 return redirect(url_for("dashboard"))
             flash("Invalid email or password.", "error")
@@ -163,6 +223,9 @@ def register_routes(app):
             password = request.form.get("password", "")
             user = User.query.filter_by(email=email, role="customer").first()
             if user and user.check_password(password):
+                if not user.active:
+                    flash("This account has been deactivated. Contact Heliolink.", "error")
+                    return render_template("portal_login.html")
                 login_user(user)
                 return redirect(url_for("portal_home"))
             flash("Invalid email or password.", "error")
@@ -206,12 +269,6 @@ def register_routes(app):
     # Dispatcher: orders / dispatch board
     # -----------------------------------------------------------------
 
-    STATUSES = ["pending", "assigned", "picked_up", "in_transit", "delivered", "collected", "failed", "returned"]
-    STATUS_LABELS = {
-        "pending": "Pending", "assigned": "Assigned", "picked_up": "Picked Up",
-        "in_transit": "In Transit", "delivered": "Delivered", "collected": "Collected",
-        "failed": "Failed / Exception", "returned": "Returned",
-    }
 
     @app.route("/orders")
     @login_required
@@ -232,7 +289,9 @@ def register_routes(app):
             order = _create_order_from_form(request.form)
             flash(f"Order {order.reference} created.", "success")
             return redirect(url_for("order_detail", order_id=order.id))
-        return render_template("order_form.html", customers=customers, today=date.today().isoformat())
+        preselect_customer = request.args.get("customer_id", type=int)
+        return render_template("order_form.html", customers=customers, today=date.today().isoformat(),
+                                preselect_customer=preselect_customer)
 
     def _create_order_from_form(form):
         pallets = int(form.get("pallets") or 0)
@@ -258,6 +317,7 @@ def register_routes(app):
             delivery_date=_parse_date(form.get("delivery_date")),
             timing=form.get("timing", "48h"),
             priority=form.get("priority", "standard"),
+            cod_amount=float(form.get("cod_amount") or 0),
         )
         db.session.add(order)
         db.session.flush()
@@ -314,7 +374,10 @@ def register_routes(app):
         order.status = status
         log_event(order, status, request.form.get("note"))
         db.session.commit()
-        send_sms(order.contact_phone, f"Your order {order.reference} is now {STATUS_LABELS.get(status, status)}.")
+        msg = f"Your order {order.reference} is now {STATUS_LABELS.get(status, status)}."
+        if status == "in_transit":
+            msg += " Confirm receipt here: " + url_for("customer_sign", reference=order.reference, _external=True)
+        send_sms(order.contact_phone, msg)
         return redirect(request.referrer or url_for("orders_board"))
 
     @app.route("/orders/<int:order_id>/assign", methods=["POST"])
@@ -454,6 +517,55 @@ def register_routes(app):
         else:
             flash(f"Customer {c.name} added.", "success")
         return redirect(url_for("customers_list"))
+
+    # -----------------------------------------------------------------
+    # Admin: employees (staff accounts)
+    # -----------------------------------------------------------------
+
+    @app.route("/employees")
+    @login_required
+    def employees_list():
+        require_role("admin")
+        staff = User.query.filter(User.role.in_(["admin", "dispatcher"])).order_by(User.name).all()
+        return render_template("employees.html", staff=staff)
+
+    @app.route("/employees/new", methods=["POST"])
+    @login_required
+    def employee_new():
+        require_role("admin")
+        email = request.form["email"].strip().lower()
+        if User.query.filter_by(email=email).first():
+            flash(f"{email} already has an account.", "error")
+            return redirect(url_for("employees_list"))
+        user = User(email=email, name=request.form["name"], role=request.form.get("role", "dispatcher"))
+        user.set_password(request.form.get("password") or "changeme123")
+        db.session.add(user)
+        db.session.commit()
+        flash(f"Employee {user.name} added as {user.role}.", "success")
+        return redirect(url_for("employees_list"))
+
+    @app.route("/employees/<int:user_id>/toggle", methods=["POST"])
+    @login_required
+    def employee_toggle(user_id):
+        require_role("admin")
+        user = User.query.get_or_404(user_id)
+        if user.id == current_user.id:
+            flash("You can't deactivate your own account.", "error")
+            return redirect(url_for("employees_list"))
+        user.active = not user.active
+        db.session.commit()
+        return redirect(url_for("employees_list"))
+
+    @app.route("/employees/<int:user_id>/reset_password", methods=["POST"])
+    @login_required
+    def employee_reset_password(user_id):
+        require_role("admin")
+        user = User.query.get_or_404(user_id)
+        new_password = request.form.get("password") or "changeme123"
+        user.set_password(new_password)
+        db.session.commit()
+        flash(f"Password reset for {user.name}.", "success")
+        return redirect(url_for("employees_list"))
 
     # -----------------------------------------------------------------
     # Dispatcher: route planner
@@ -663,42 +775,13 @@ def register_routes(app):
         if order.driver_id != current_user.driver_id:
             abort(403)
 
-        exception_reason = request.form.get("exception_reason", "").strip()
-        override_missing = request.form.get("override_missing") == "on"
-        scanned = sum(1 for b in order.boxes if b.scanned)
-        total = len(order.boxes)
-
-        if total > 0 and scanned < total and not override_missing and not exception_reason:
+        final_status = apply_pod(order, request.form, source="driver")
+        if final_status is None:
+            scanned = sum(1 for b in order.boxes if b.scanned)
+            total = len(order.boxes)
             flash(f"Only {scanned}/{total} items scanned. Scan the rest, or tick "
                   f"'complete with items missing' to override.", "error")
             return redirect(url_for("driver_stop", order_id=order.id))
-
-        for b in order.boxes:
-            if not b.scanned:
-                b.missing = True
-
-        final_status = "failed" if exception_reason else (
-            "collected" if order.job_type == "collection" else "delivered")
-
-        pod = ProofOfDelivery.query.filter_by(order_id=order.id).first()
-        if not pod:
-            pod = ProofOfDelivery(order_id=order.id)
-            db.session.add(pod)
-        pod.recipient_name = request.form.get("recipient_name")
-        pod.signature_data_url = request.form.get("signature_data_url")
-        pod.photo_data_url = request.form.get("photo_data_url") or pod.photo_data_url
-        pod.notes = request.form.get("notes")
-        pod.exception_reason = exception_reason or None
-        pod.boxes_confirmed = scanned
-        pod.boxes_missing = total - scanned
-        pod.delivered_at = datetime.utcnow()
-        order.status = final_status
-        note = f"Exception: {exception_reason}" if exception_reason else (
-            f"Confirmed by {pod.recipient_name or 'recipient'} ({scanned}/{total} items scanned)")
-        log_event(order, final_status, note)
-        db.session.commit()
-
-        send_sms(order.contact_phone, f"Order {order.reference}: {STATUS_LABELS.get(final_status, final_status)}.")
 
         remaining = Order.query.filter(
             Order.driver_id == current_user.driver_id,
@@ -727,7 +810,94 @@ def register_routes(app):
         order.status = request.form.get("status", "in_transit")
         log_event(order, order.status, "Driver update")
         db.session.commit()
+        if order.status == "in_transit":
+            link = url_for("customer_sign", reference=order.reference, _external=True)
+            send_sms(order.contact_phone, f"Your order {order.reference} is out for delivery. Confirm receipt here: {link}")
         return redirect(url_for("driver_stop", order_id=order.id))
+
+    @app.route("/driver/stop/<int:order_id>/ping_location", methods=["POST"])
+    @login_required
+    def driver_ping_location(order_id):
+        """One-shot browser-geolocation ping when a driver opens a stop -
+        gives dispatch/customers a last-known position without needing
+        continuous background GPS tracking or a paid maps API."""
+        require_role("driver")
+        order = Order.query.get_or_404(order_id)
+        if order.driver_id != current_user.driver_id:
+            abort(403)
+        try:
+            order.last_known_lat = float(request.form["lat"])
+            order.last_known_lng = float(request.form["lng"])
+            order.last_location_at = datetime.utcnow()
+            db.session.commit()
+        except (KeyError, ValueError):
+            pass
+        return jsonify({"ok": True})
+
+    # -----------------------------------------------------------------
+    # Contactless customer self-service signing (matches Detrack's
+    # SMS-link POD, where the recipient signs on their own device)
+    # -----------------------------------------------------------------
+
+    @app.route("/sign/<reference>", methods=["GET", "POST"])
+    def customer_sign(reference):
+        order = Order.query.filter_by(reference=reference).first_or_404()
+        if order.status not in ("assigned", "picked_up", "in_transit"):
+            return render_template("sign.html", order=order, closed=True)
+
+        if request.method == "POST":
+            final_status = apply_pod(order, request.form, source="customer")
+            if final_status is None:
+                scanned = sum(1 for b in order.boxes if b.scanned)
+                total = len(order.boxes)
+                flash(f"The driver has {scanned}/{total} items scanned so far - "
+                      f"please ask them to finish scanning before you sign, or tick "
+                      f"the override box if you're confirming a partial delivery.", "error")
+                return render_template("sign.html", order=order, closed=False)
+            return render_template("sign.html", order=order, closed=True, just_signed=True)
+
+        return render_template("sign.html", order=order, closed=False)
+
+    # -----------------------------------------------------------------
+    # Detrack-style printable run sheet & bulk label export
+    # -----------------------------------------------------------------
+
+    @app.route("/runsheet")
+    @login_required
+    def runsheet_picker():
+        require_role("admin", "dispatcher")
+        drivers = Driver.query.order_by(Driver.name).all()
+        return render_template("runsheet_picker.html", drivers=drivers, today=date.today().isoformat())
+
+    @app.route("/runsheet/<int:driver_id>")
+    @login_required
+    def runsheet(driver_id):
+        require_role("admin", "dispatcher")
+        driver = Driver.query.get_or_404(driver_id)
+        run_date = _parse_date(request.args.get("date")) or date.today()
+        stops = Order.query.filter(
+            Order.driver_id == driver.id,
+            Order.status.in_(["assigned", "picked_up", "in_transit", "delivered", "collected", "failed"]),
+        ).filter(
+            db.or_(Order.delivery_date == run_date, Order.collection_date == run_date)
+        ).order_by(Order.updated_at).all()
+        return render_template("runsheet.html", driver=driver, stops=stops, run_date=run_date)
+
+    @app.route("/labels/bulk")
+    @login_required
+    def labels_bulk_picker():
+        require_role("admin", "dispatcher")
+        return render_template("labels_bulk_picker.html", today=date.today().isoformat())
+
+    @app.route("/labels/bulk/print")
+    @login_required
+    def labels_bulk_print():
+        require_role("admin", "dispatcher")
+        print_date = _parse_date(request.args.get("date")) or date.today()
+        orders = Order.query.filter(
+            db.or_(Order.delivery_date == print_date, Order.collection_date == print_date)
+        ).order_by(Order.reference).all()
+        return render_template("labels_bulk.html", orders=orders, print_date=print_date)
 
     # -----------------------------------------------------------------
     # Customer portal
@@ -1056,7 +1226,7 @@ def seed_if_needed():
         db.session.commit()
         print(f"[seed] Admin login created: {admin_email} / {admin_password}")
 
-    if os.environ.get("SEED_DEMO", "true").lower() == "true" and Customer.query.count() == 0:
+    if os.environ.get("SEED_DEMO", "false").lower() == "true" and Customer.query.count() == 0:
         _seed_demo_data()
 
 

@@ -40,6 +40,12 @@
       <input type="hidden" name="photo_data_url" id="photoData">
     </div>
     <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" name="notes" rows="2"></textarea></div>
+    {% if order.cod_amount %}
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="cod_collected" id="codc">
+      <label class="form-check-label" for="codc">Collected £{{ '%.2f'|format(order.cod_amount) }} cash/payment on delivery</label>
+    </div>
+    {% endif %}
     {% if total > 0 %}
     <div class="form-check mb-2">
       <input class="form-check-input" type="checkbox" name="override_missing" id="override">
@@ -73,6 +79,15 @@ document.getElementById("manualScanBtn").addEventListener("click", function() {
 document.getElementById("manualCode").addEventListener("keydown", function(e) {
   if (e.key === "Enter") { e.preventDefault(); document.getElementById("manualScanBtn").click(); }
 });
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    fetch("{{ url_for('driver_ping_location', order_id=order.id) }}", {
+      method: "POST",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      body: "lat=" + pos.coords.latitude + "&lng=" + pos.coords.longitude
+    }).catch(() => {});
+  }, function() {}, { timeout: 5000 });
+}
 document.getElementById("photoInput").addEventListener("change", function(e) {
   var file = e.target.files[0];
   if (!file) return;

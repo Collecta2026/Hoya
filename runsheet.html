@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Run Sheet — {{ driver.name }} — {{ run_date }}</title>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<style>
+body { font-family: Arial, sans-serif; font-size: 13px; margin: 20px; }
+h1 { font-size: 20px; margin-bottom: 2px; }
+.meta { color: #555; margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; vertical-align: top; }
+th { background: #eee; }
+.no-print { margin-bottom: 12px; }
+@media print { .no-print { display: none; } }
+</style>
+</head>
+<body>
+<div class="no-print"><button onclick="window.print()">Print</button></div>
+<h1>Run Sheet</h1>
+<div class="meta">Driver: <b>{{ driver.name }}</b> &middot; Vehicle: {{ driver.vehicle.registration if driver.vehicle else '—' }} &middot; Date: {{ run_date }} &middot; {{ stops|length }} stop(s)</div>
+<table>
+<thead>
+<tr><th>#</th><th>Ref</th><th>Type</th><th>Customer</th><th>Address</th><th>Pallets/Parcels</th><th>COD</th><th>Barcode</th><th>Status</th><th>Signature / Notes</th></tr>
+</thead>
+<tbody>
+{% for o in stops %}
+<tr>
+  <td>{{ loop.index }}</td>
+  <td>{{ o.reference }}</td>
+  <td>{{ o.job_type }}</td>
+  <td>{{ o.customer.name }}</td>
+  <td>{{ o.delivery_address if o.job_type=='delivery' else o.collection_address }}<br>{{ o.delivery_postcode if o.job_type=='delivery' else o.collection_postcode }}</td>
+  <td>{{ o.pallets }}p / {{ o.parcels }}pc</td>
+  <td>{% if o.cod_amount %}£{{ '%.2f'|format(o.cod_amount) }}{% if o.cod_collected %} ✓{% endif %}{% else %}—{% endif %}</td>
+  <td><svg class="barcode" jsbarcode-value="{{ o.reference }}" jsbarcode-height="30" jsbarcode-fontsize="10"></svg></td>
+  <td>{{ o.status }}</td>
+  <td style="min-width:140px"></td>
+</tr>
+{% else %}
+<tr><td colspan="10">No stops scheduled for this driver on this date.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<script>JsBarcode(".barcode").init();</script>
+</body></html>

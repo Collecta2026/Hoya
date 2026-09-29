@@ -145,6 +145,17 @@ class Order(db.Model):
     invoiced = db.Column(db.Boolean, default=False)
     invoice_id = db.Column(db.Integer, db.ForeignKey("invoices.id"), nullable=True)
 
+    # Cash on delivery
+    cod_amount = db.Column(db.Float, default=0.0)
+    cod_collected = db.Column(db.Boolean, default=False)
+
+    # Lightweight "last known location" ping from the driver's phone (browser
+    # geolocation, one-shot per stop open) - not continuous live GPS tracking,
+    # but gives dispatch/customers a last-seen position without a paid API.
+    last_known_lat = db.Column(db.Float)
+    last_known_lng = db.Column(db.Float)
+    last_location_at = db.Column(db.DateTime)
+
     created_at = db.Column(db.DateTime, default=now)
     updated_at = db.Column(db.DateTime, default=now, onupdate=now)
 

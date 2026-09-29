@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}Bulk Print Labels{% endblock %}
+{% block content %}
+<h3 class="mb-3">Bulk Print Labels</h3>
+<p class="text-muted">Prints every pallet/parcel barcode label for all orders scheduled (collection or delivery) on a given date — matches Detrack's "Export shipping labels for a date" flow.</p>
+<div class="card p-3" style="max-width:420px">
+  <label class="form-label">Date</label>
+  <input type="date" class="form-control mb-3" id="dateSel" value="{{ today }}">
+  <button type="button" class="btn btn-primary" id="goBtn">Generate labels</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("goBtn").addEventListener("click", function() {
+  var date = document.getElementById("dateSel").value;
+  window.open("/labels/bulk/print?date=" + date, "_blank");
+});
+</script>
+{% endblock %}

@@ -5,10 +5,13 @@
   <div class="col-md-7">
     <div class="card p-3">
       <table class="table table-sm">
-        <thead><tr><th>Name</th><th>Pricing</th><th>Discount</th><th>Zone</th></tr></thead>
+        <thead><tr><th>Name</th><th>Pricing</th><th>Discount</th><th>Zone</th><th></th></tr></thead>
         <tbody>
         {% for c in customers %}
-        <tr><td>{{ c.name }}</td><td>{{ c.pricing_mode }}</td><td>{{ c.discount_pct }}%</td><td>{{ c.zone.name if c.zone else '—' }}</td></tr>
+        <tr>
+          <td>{{ c.name }}</td><td>{{ c.pricing_mode }}</td><td>{{ c.discount_pct }}%</td><td>{{ c.zone.name if c.zone else '—' }}</td>
+          <td><a class="btn btn-sm btn-primary" href="{{ url_for('order_new', customer_id=c.id) }}">Place order</a></td>
+        </tr>
         {% endfor %}
         </tbody>
       </table>

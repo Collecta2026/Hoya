@@ -19,17 +19,15 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open http://localhost:5000. On first run it seeds:
+Open http://localhost:5000. On first run it creates one admin login
+(`admin@heliolink.co` / `Heliolink26` by default — override with the
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` env vars) plus the default rate settings,
+UK zone multipliers, and a standard surcharge catalogue. **No demo
+customers, drivers, vehicles or orders are created** — the app starts
+clean and everything else is entered by an admin (see Employees, Fleet and
+Customers below).
 
-- **Admin login:** `admin@heliolink.co` / `Heliolink26` (override with
-  `ADMIN_EMAIL` / `ADMIN_PASSWORD` env vars)
-- **Demo customer portal login:** `ops@williamshandbaked.co.uk` / `customer123`
-- **Demo drivers (PIN login):** Jamie Ellis (1111), Priya Anand (2222),
-  Marcus Reid (3333)
-- Sample vehicles, and 5 sample orders across 2 demo customers
-
-Set `SEED_DEMO=false` to skip demo data (used automatically on the
-production deploy below).
+If you want sample data for local testing/demos, set `SEED_DEMO=true`.
 
 ## Architecture
 
@@ -84,12 +82,38 @@ driver app, and the customer portal in plain language.
    - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` — optional,
      for real SMS instead of log-only
 4. Redeploy. Tables are created automatically on first request
-   (`db.create_all()`), so no manual migration step is needed for a first
-   deploy — for schema changes later, re-deploying with new columns/tables
-   will add them, but existing data is preserved (SQLAlchemy doesn't drop
-   tables on `create_all()`).
+   (`db.create_all()`) — this only works for **brand new tables that don't
+   exist yet**. It does **not** add new columns to a table that already
+   exists. So: a first-ever deploy against an empty database needs nothing
+   extra, but updating an already-deployed database to a newer version of
+   this app (one that added columns to an existing table, like this
+   version did) needs a manual `ALTER TABLE` — see "Upgrading an existing
+   deployment" below. Skipping this shows up as
+   `psycopg2.errors.UndefinedColumn` on startup.
 5. Visit `/healthz` to confirm the app is live, then log in with your admin
-   credentials and start adding real customers, fleet and orders.
+   credentials and start adding real employees, fleet, customers and orders.
+
+### Upgrading an existing deployment to this version
+
+This version added cash-on-delivery and last-known-location fields to the
+`orders` table. If you're updating a database that was already running an
+earlier version of Hoya (rather than starting fresh), run this once in
+Neon's SQL Editor **before** redeploying, so the existing `orders` table
+gains the new columns instead of crashing on startup:
+
+```sql
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cod_amount FLOAT DEFAULT 0.0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cod_collected BOOLEAN DEFAULT FALSE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_known_lat FLOAT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_known_lng FLOAT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_location_at TIMESTAMP;
+```
+
+This only touches the `orders` table and adds columns — it doesn't delete
+or change anything else, so existing customers, employees, drivers and
+orders are untouched. If a future update adds more columns, the same
+pattern applies: check the diff, write the matching `ALTER TABLE`
+statements, run them first, then redeploy.
 
 ### Note on Python version
 
@@ -97,16 +121,29 @@ Render can default to a very new Python where `psycopg2-binary` has no
 prebuilt wheel yet. `runtime.txt` and `.python-version` pin the build to
 3.12.7 to avoid this (the same fix used previously on this platform).
 
-## Known gaps vs a full commercial platform (e.g. Detrack/TrackPod)
+## Feature checklist vs Detrack (researched against Detrack's own docs)
 
-- No native offline driver app (this is an installable PWA-style web app —
-  works great with a signal, doesn't queue actions while fully offline)
-- No live GPS tracking map (stop sequencing is postcode-based, not GPS-based)
-- Route distances are straight-line-based with a routing-inefficiency
-  correction factor, not real road-network routing (no paid API key needed)
-- No inbound API/webhooks or bulk CSV import yet (orders are entered via
-  the dispatcher form, the customer portal, or could be scripted against
-  the existing routes)
+| Detrack feature | Status in Hoya |
+|---|---|
+| Job/order creation, dispatch, status tracking | ✅ Dispatch board, order detail, event history |
+| Driver & vehicle management | ✅ Fleet page, live status (available/on route/off) |
+| Employee/staff accounts, role-based access | ✅ Employees page (admin-only), dispatcher vs admin roles |
+| Route sequencing / planning | ✅ Nearest-neighbour over UK postcode areas (no paid API key) |
+| Item-level barcode scanning (load, delivery, collection) | ✅ Scan-gated stop completion, standalone scanner page |
+| Shipping label printing (single order) | ✅ Order detail → Print Labels |
+| Bulk shipping label export for a date | ✅ Bulk Print Labels (Operations menu) |
+| Printable run sheet for a driver | ✅ Print Run Sheet (Operations menu) |
+| Proof of delivery: signature, photo, notes, partial items | ✅ Driver app POD form + box-level scan confirmation |
+| Contactless SMS-link POD (customer signs on own device) | ✅ Auto-texted when a job goes In Transit; also on order detail |
+| Cash on delivery (COD) capture | ✅ Order-level COD amount + collected flag (driver or customer can confirm) |
+| Customer notifications (SMS on status change) | ✅ Twilio, with a log-only fallback when not configured |
+| Customer self-service portal (place/track orders, invoices) | ✅ Portal login, order placement, tracking, invoices |
+| Zone-based / automated job assignment | ✅ Pending Work Board's "Suggest" (smallest fitting van + free driver) |
+| KPI reporting / exports | ✅ Insights dashboard + CSV export |
+| Live GPS tracking on a map | ⚠️ Partial — one-off "last known location" ping per stop (Google Maps link), not a continuous live-tracking map |
+| Route distances via real road network | ⚠️ Partial — straight-line distance with a routing-inefficiency correction factor, not turn-by-turn road routing (avoids needing a paid mapping API) |
+| Native offline mobile app | ❌ Driver app is an installable web app (PWA-style); needs a signal, doesn't queue actions offline |
+| Inbound API/webhooks, bulk CSV import of orders | ❌ Not built — orders go in via the dispatcher form or customer portal |
 
-These are the same gaps documented on the platform's history and can be
-prioritised as a follow-up phase.
+The ⚠️/❌ rows are the realistic gaps against a mature paid platform like
+Detrack; everything else above is implemented and tested end to end.

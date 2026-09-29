@@ -17,6 +17,16 @@
         <tr><th>Pallets / Parcels</th><td>{{ order.pallets }} / {{ order.parcels }} ({{ order.total_weight_kg }} kg)</td></tr>
         <tr><th>Schedule</th><td>Collect {{ order.collection_date or '—' }} · Deliver {{ order.delivery_date or '—' }} · {{ order.timing }}</td></tr>
         <tr><th>Quoted price</th><td>£{{ '%.2f'|format(order.quoted_price or 0) }}</td></tr>
+        {% if order.cod_amount %}
+        <tr><th>Cash on delivery</th><td>£{{ '%.2f'|format(order.cod_amount) }} {% if order.cod_collected %}<span class="badge bg-success">Collected</span>{% else %}<span class="badge bg-secondary">Not yet collected</span>{% endif %}</td></tr>
+        {% endif %}
+        {% if order.last_known_lat %}
+        <tr><th>Last known driver location</th>
+          <td><a href="https://www.google.com/maps?q={{ order.last_known_lat }},{{ order.last_known_lng }}" target="_blank">View on map</a>
+            <span class="text-muted small">(as of {{ order.last_location_at.strftime('%H:%M') }} — not live GPS, just a one-off ping from the driver's phone)</span></td></tr>
+        {% endif %}
+        <tr><th>Contactless signing link</th><td><a href="{{ url_for('customer_sign', reference=order.reference) }}" target="_blank">{{ url_for('customer_sign', reference=order.reference, _external=True) }}</a>
+          <span class="text-muted small">(sent automatically by SMS when a job goes "In Transit")</span></td></tr>
         <tr><th>Notes</th><td>{{ order.notes or '—' }}</td></tr>
       </table>
     </div>

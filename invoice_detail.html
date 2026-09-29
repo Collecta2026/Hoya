@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% block title %}{{ invoice.invoice_number }}{% endblock %}
+{% block content %}
+<h3>{{ invoice.invoice_number }} — {{ invoice.customer.name }}</h3>
+<p class="text-muted">Period {{ invoice.period_start }} – {{ invoice.period_end }} &middot; Status: {{ invoice.status }}</p>
+{% if current_user.role in ['admin','dispatcher'] %}
+<form method="post" action="{{ url_for('invoice_set_status', invoice_id=invoice.id) }}" class="mb-3">
+  <select name="status" class="form-select d-inline w-auto" onchange="this.form.submit()">
+    <option value="draft" {% if invoice.status=='draft' %}selected{% endif %}>Draft</option>
+    <option value="sent" {% if invoice.status=='sent' %}selected{% endif %}>Sent</option>
+    <option value="paid" {% if invoice.status=='paid' %}selected{% endif %}>Paid</option>
+  </select>
+</form>
+{% endif %}
+<div class="card p-3">
+  <table class="table table-sm">
+    <thead><tr><th>Ref</th><th>Route</th><th>Pallets</th><th>Weight</th><th>Price</th><th>POD</th></tr></thead>
+    <tbody>
+    {% for o in invoice.orders %}
+    <tr>
+      <td>{{ o.reference }}</td>
+      <td>{{ o.collection_postcode }} → {{ o.delivery_postcode }}</td>
+      <td>{{ o.pallets }}</td><td>{{ o.total_weight_kg }} kg</td>
+      <td>£{{ '%.2f'|format((o.quoted_price or 0) + o.surcharges|sum(attribute='amount')) }}</td>
+      <td><a href="{{ url_for('pod_public', reference=o.reference) }}" target="_blank">View</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <table class="table table-sm w-auto ms-auto">
+    <tr><th>Subtotal</th><td>£{{ '%.2f'|format(invoice.subtotal) }}</td></tr>
+    <tr><th>Fuel surcharge</th><td>£{{ '%.2f'|format(invoice.fuel_surcharge) }}</td></tr>
+    <tr><th>VAT</th><td>£{{ '%.2f'|format(invoice.vat) }}</td></tr>
+    <tr><th>Total</th><td><b>£{{ '%.2f'|format(invoice.total) }}</b></td></tr>
+  </table>
+</div>
+{% endblock %}

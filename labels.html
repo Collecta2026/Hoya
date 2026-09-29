@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Labels {{ order.reference }}</title>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<style>
+body { font-family: Arial, sans-serif; }
+.label { width: 4in; height: 4in; border: 2px solid #000; padding: 10px; margin: 10px; display: inline-block; box-sizing: border-box; }
+.label h4 { margin: 4px 0; }
+.label .meta { font-size: 13px; }
+@media print { .no-print { display: none; } }
+</style>
+</head>
+<body>
+<div class="no-print p-2"><button onclick="window.print()">Print</button></div>
+{% for b in order.boxes %}
+<div class="label">
+  <h4>{{ order.reference }}</h4>
+  <div class="meta"><b>Deliver to:</b><br>{{ order.delivery_address }}<br>{{ order.delivery_postcode }}</div>
+  <div class="meta">{{ b.kind|capitalize }} {{ b.label_index }} &middot; Pallets: {{ order.pallets }} &middot; Weight/pallet: {{ order.weight_per_pallet_kg }}kg &middot; Total: {{ order.total_weight_kg }}kg</div>
+  <svg class="barcode" jsbarcode-value="{{ b.barcode }}" jsbarcode-height="60"></svg>
+</div>
+{% else %}
+<div class="label">
+  <h4>{{ order.reference }}</h4>
+  <div class="meta">{{ order.delivery_address }}<br>{{ order.delivery_postcode }}</div>
+  <svg class="barcode" jsbarcode-value="{{ order.reference }}" jsbarcode-height="60"></svg>
+</div>
+{% endfor %}
+<script>JsBarcode(".barcode").init();</script>
+</body></html>

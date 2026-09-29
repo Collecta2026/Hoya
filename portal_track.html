@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% block title %}Track {{ order.reference }}{% endblock %}
+{% block content %}
+<h3>{{ order.reference }} <span class="badge bg-secondary badge-status">{{ status_labels[order.status] }}</span></h3>
+<p>{{ order.delivery_address }}, {{ order.delivery_postcode }}</p>
+<p class="text-muted">Collection {{ order.collection_date or '—' }} {{ order.collection_time or '' }} &middot; Delivery {{ order.delivery_date or '—' }} ({{ order.timing }})</p>
+<div class="card p-3">
+  <h5>History</h5>
+  <ul class="list-group list-group-flush">
+    {% for e in order.events %}
+    <li class="list-group-item d-flex justify-content-between">
+      <span>{{ e.status }} {{ '— ' + e.note if e.note else '' }}</span>
+      <span class="text-muted small">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% if order.pod %}
+<div class="card p-3 mt-3">
+  <h5>Proof of delivery</h5>
+  <p>Signed by: {{ order.pod.recipient_name or '—' }}</p>
+  {% if order.pod.photo_data_url %}<img src="{{ order.pod.photo_data_url }}" class="img-fluid rounded" style="max-width:300px">{% endif %}
+</div>
+{% endif %}
+<a class="btn btn-outline-secondary mt-3" href="{{ url_for('order_label', order_id=order.id) }}" target="_blank">Print labels</a>
+{% endblock %}

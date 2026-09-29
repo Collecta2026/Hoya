@@ -1,5 +1,1 @@
-__pycache__/
-*.pyc
-helioops.db
-.env
-venv/
+3.12.7

@@ -1,84 +1,94 @@
-{% extends "base.html" %}
-{% block title %}Stop {{ s.sequence }}{% endblock %}
-{% block body %}
-<div class="phone">
-  <p class="small"><a href="{{ url_for('driver_route', rid=s.route_id) }}">← {{ s.route.name }}</a></p>
-  <div class="card">
-    <h1 style="margin-bottom:.2rem">{{ s.order.recipient or s.order.customer.name }}</h1>
-    <p class="muted" style="margin:0">{{ s.order.address or '' }}<br>{{ s.order.postcode }}</p>
-    <p class="small muted">{{ s.order.customer.name }} · {{ s.order.pallets }} pallet(s) · {{ s.order.ref }}
-       {% if s.order.notes %}<br>Note: {{ s.order.notes }}{% endif %}</p>
-    <div class="actions">
-      <a class="btn ghost sm" href="https://www.google.com/maps/dir/?api=1&destination={{ s.order.postcode|urlencode }}" target="_blank">Navigate</a>
-      {% if s.order.phone %}<a class="btn ghost sm" href="tel:{{ s.order.phone }}">Call recipient</a>{% endif %}
-      {% if s.status == 'pending' %}
-      <form method="post" action="{{ url_for('driver_arrive', sid=s.id) }}" style="margin:0">
-        <button class="btn sm teal">Mark arrived</button></form>
-      {% endif %}
-    </div>
-    {% if s.order.items %}
-    <a class="btn block" style="margin-top:.8rem" href="{{ url_for('driver_scan', sid=s.id) }}">
-      📷 {{ 'Scan items to collect' if mode=='collect' else 'Scan items to deliver' }}
-      ({{ s.order.scanned_count }}/{{ s.order.items|length }})</a>
-    {% endif %}
-  </div>
+{% extends "base.html" %}{% block title %}Stop {{ order.reference }}{% endblock %}
+{% block content %}
+<a href="{{ url_for('driver_home') }}">&larr; Back to route</a>
+<h4 class="mt-2">{{ order.reference }} — {{ order.customer.name }}</h4>
+<p>{{ order.delivery_address if order.job_type=='delivery' else order.collection_address }}<br>
+   {{ order.delivery_postcode if order.job_type=='delivery' else order.collection_postcode }}</p>
+<p>{{ order.contact_name }} &middot; {{ order.contact_phone }}</p>
+{% if order.notes %}<p class="text-muted">Notes: {{ order.notes }}</p>{% endif %}
 
-  {% if s.status in ['delivered','failed'] and s.pod %}
-  <div class="card">
-    <h2>Proof of delivery <span class="pill {{ s.pod.outcome }}">{{ s.pod.outcome }}</span></h2>
-    <p class="small muted">Signed by {{ s.pod.signed_by or '—' }} · {{ s.pod.created_at.strftime('%d %b %H:%M') }} · GPS {{ s.pod.gps or 'n/a' }}</p>
-    {% if s.pod.notes %}<p>{{ s.pod.notes }}</p>{% endif %}
-    <div class="actions">
-      {% if s.pod.photo %}<img class="podimg" src="{{ url_for('pod_photo', pid=s.pod.id) }}">{% endif %}
-      {% if s.pod.signature %}<img class="podimg" src="{{ url_for('pod_signature', pid=s.pod.id) }}">{% endif %}
-    </div>
-  </div>
-  {% else %}
-  <div class="card">
-    <h2>Complete this stop</h2>
-    <form method="post" enctype="multipart/form-data" id="podform">
-      <label>Outcome</label>
-      {% if mode=='collect' %}
-      <select name="outcome"><option value="collected">Collected</option><option value="failed">Failed / unable to collect</option></select>
-      {% else %}
-      <select name="outcome"><option value="delivered">Delivered</option><option value="failed">Failed / unable to deliver</option></select>
-      {% endif %}
-      <label>Photo (parcel / doorstep)</label>
-      <input type="file" name="photo" accept="image/*" capture="environment">
-      <label>Received by (name)</label><input name="signed_by">
-      <label>Signature</label>
-      <canvas class="sig" id="sig"></canvas>
-      <div class="small"><a href="#" onclick="clearSig();return false">Clear signature</a></div>
-      <label>Notes</label><textarea name="notes" rows="2" placeholder="Left with neighbour, etc."></textarea>
-      <input type="hidden" name="signature_data" id="signature_data">
-      <input type="hidden" name="gps" id="gps">
-      <button class="btn block big" style="margin-top:.8rem" onclick="return saveSig()">{{ "Save collection & notify" if mode=="collect" else "Save POD & notify customer" }}</button>
-    </form>
-  </div>
-  {% endif %}
+<div class="d-flex gap-2 mb-3 no-print">
+  <a class="btn btn-outline-secondary btn-sm" target="_blank"
+     href="https://www.google.com/maps/dir/?api=1&destination={{ (order.delivery_address if order.job_type=='delivery' else order.collection_address)|urlencode }}">Google Maps</a>
+  <a class="btn btn-outline-secondary btn-sm" target="_blank"
+     href="https://www.waze.com/ul?q={{ (order.delivery_postcode if order.job_type=='delivery' else order.collection_postcode)|urlencode }}&navigate=yes">Waze</a>
 </div>
-{% endblock %}
-{% block scripts %}
+
+<div class="card p-3 mb-3">
+  <h5>Scan boxes <span id="progress">({{ scanned }}/{{ total }})</span></h5>
+  {% if total == 0 %}<p class="text-muted">No boxes recorded for this order — no scan gate required.</p>{% endif %}
+  <div id="scanmsg" class="small mb-2"></div>
+  <div id="reader" style="width:100%;max-width:360px;"></div>
+  <div class="input-group mt-2" style="max-width:360px;">
+    <input type="text" id="manualCode" class="form-control scan-box" placeholder="Scan or type barcode">
+    <button class="btn btn-primary" id="manualScanBtn">Scan</button>
+  </div>
+  <ul class="list-unstyled mt-2 small">
+    {% for b in order.boxes %}
+    <li id="box-{{ b.barcode }}">{{ b.barcode }} — {% if b.scanned %}<span class="text-success">✓ scanned</span>{% else %}<span class="text-muted">pending</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="card p-3">
+  <h5>Complete stop</h5>
+  <form method="post" action="{{ url_for('driver_complete', order_id=order.id) }}" id="completeForm">
+    <div class="mb-2"><label class="form-label">Recipient name</label><input class="form-control" name="recipient_name"></div>
+    <div class="mb-2"><label class="form-label">Signature (type full name to confirm)</label><input class="form-control" name="signature_data_url"></div>
+    <div class="mb-2"><label class="form-label">Photo</label>
+      <input type="file" accept="image/*" capture="environment" class="form-control" id="photoInput">
+      <input type="hidden" name="photo_data_url" id="photoData">
+    </div>
+    <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" name="notes" rows="2"></textarea></div>
+    {% if total > 0 %}
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="override_missing" id="override">
+      <label class="form-check-label" for="override">Complete with items missing (override scan gate)</label>
+    </div>
+    {% endif %}
+    <div class="mb-2"><label class="form-label">Exception reason (leave blank if successful)</label>
+      <input class="form-control" name="exception_reason" placeholder="e.g. no answer, refused, damaged"></div>
+    <button class="btn btn-success big-btn w-100" type="submit">Confirm &amp; Complete Stop</button>
+  </form>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
-// signature pad
-const cv=document.getElementById('sig');
-if(cv){
-  const ctx=cv.getContext('2d');
-  function fit(){cv.width=cv.offsetWidth;cv.height=cv.offsetHeight;ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111';}
-  fit();window.addEventListener('resize',fit);
-  let draw=false,drew=false;
-  function pos(e){const r=cv.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top};}
-  function start(e){draw=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);e.preventDefault();}
-  function move(e){if(!draw)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();drew=true;e.preventDefault();}
-  function end(){draw=false;}
-  cv.addEventListener('mousedown',start);cv.addEventListener('mousemove',move);cv.addEventListener('mouseup',end);
-  cv.addEventListener('touchstart',start);cv.addEventListener('touchmove',move);cv.addEventListener('touchend',end);
-  window.clearSig=()=>{ctx.clearRect(0,0,cv.width,cv.height);drew=false;};
-  window.saveSig=()=>{if(drew){document.getElementById('signature_data').value=cv.toDataURL('image/png');}return true;};
+function submitScan(code) {
+  fetch("{{ url_for('driver_scan', order_id=order.id) }}", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch"},
+    body: "barcode=" + encodeURIComponent(code)
+  }).then(r => r.json()).then(data => {
+    document.getElementById("scanmsg").textContent = data.message;
+    document.getElementById("progress").textContent = "(" + data.scanned + "/" + data.total + ")";
+    var li = document.getElementById("box-" + code);
+    if (li && data.ok) li.innerHTML = code + " — <span class='text-success'>✓ scanned</span>";
+  }).catch(() => {});
 }
-// grab GPS if allowed
-if(navigator.geolocation){navigator.geolocation.getCurrentPosition(p=>{
-  document.getElementById('gps').value=p.coords.latitude.toFixed(5)+','+p.coords.longitude.toFixed(5);
-},()=>{},{timeout:5000});}
+document.getElementById("manualScanBtn").addEventListener("click", function() {
+  var v = document.getElementById("manualCode").value.trim();
+  if (v) { submitScan(v); document.getElementById("manualCode").value = ""; }
+});
+document.getElementById("manualCode").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("manualScanBtn").click(); }
+});
+document.getElementById("photoInput").addEventListener("change", function(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function() { document.getElementById("photoData").value = reader.result; };
+  reader.readAsDataURL(file);
+});
+try {
+  var qr = new Html5Qrcode("reader");
+  Html5Qrcode.getCameras().then(cams => {
+    if (cams && cams.length) {
+      qr.start({ facingMode: "environment" }, { fps: 10, qrbox: 220 }, (text) => submitScan(text));
+    }
+  }).catch(() => { document.getElementById("reader").innerHTML = "<p class='text-muted small'>Camera not available — use manual entry below.</p>"; });
+} catch (e) {
+  document.getElementById("reader").innerHTML = "<p class='text-muted small'>Camera scanning not supported — use manual entry below.</p>";
+}
 </script>
 {% endblock %}

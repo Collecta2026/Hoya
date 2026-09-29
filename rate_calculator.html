@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block title %}Rate Calculator{% endblock %}
+{% block content %}
+<h3 class="mb-3">Interactive Rate Calculator</h3>
+<div class="row g-3">
+  <div class="col-md-5">
+    <div class="card p-3">
+      <div class="mb-2"><label class="form-label">Delivery postcode</label><input class="form-control" id="postcode" value="M1 1AA"></div>
+      <div class="mb-2"><label class="form-label">Pallets</label><input type="number" class="form-control" id="pallets" value="2"></div>
+      <div class="mb-2"><label class="form-label">Vehicle</label>
+        <select class="form-select" id="vehicle">
+          {% for s in vehicle_sizes %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="mb-2"><label class="form-label">Timing</label>
+        <select class="form-select" id="timing"><option value="48h">48h</option><option value="same_day">Same day</option></select>
+      </div>
+      <button class="btn btn-primary" id="calcBtn">Calculate</button>
+    </div>
+  </div>
+  <div class="col-md-7">
+    <div class="card p-3">
+      <h5>Result</h5>
+      <table class="table table-sm" id="resultTable"><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("calcBtn").addEventListener("click", function() {
+  fetch("{{ url_for('api_recommend') }}", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      postcode: document.getElementById("postcode").value,
+      pallets: document.getElementById("pallets").value,
+      vehicle: document.getElementById("vehicle").value,
+      timing: document.getElementById("timing").value,
+    })
+  }).then(r => r.json()).then(data => {
+    var rows = "";
+    for (var key in data) { rows += "<tr><th>" + key + "</th><td>" + data[key] + "</td></tr>"; }
+    document.querySelector("#resultTable tbody").innerHTML = rows;
+  });
+});
+</script>
+{% endblock %}

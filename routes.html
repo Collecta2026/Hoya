@@ -1,24 +1,46 @@
-{% extends "base.html" %}
-{% block title %}Routes{% endblock %}
-{% block body %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-  <h1>Routes</h1><a class="btn" href="{{ url_for('route_plan') }}">Plan route</a>
-</div>
-<div class="card">
-<table>
-  <thead><tr><th>Ref</th><th>Date</th><th>Name</th><th>Driver</th><th>Vehicle</th><th>Stops</th><th>Status</th><th></th></tr></thead>
-  <tbody>
-  {% for r in routes %}
-    <tr>
-      <td class="mono">{{ r.ref }}</td><td>{{ r.run_date.strftime('%d %b') }}</td><td>{{ r.name }}</td>
-      <td>{{ r.driver.user.name if r.driver else '—' }}</td>
-      <td class="mono">{{ r.vehicle.reg if r.vehicle else '—' }}</td>
-      <td>{% set done = r.stops|selectattr('status','in',['delivered','failed'])|list|length %}{{ done }}/{{ r.stops|length }}</td>
-      <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
-      <td><a class="btn sm ghost" href="{{ url_for('route_detail', rid=r.id) }}">Open</a></td>
-    </tr>
-  {% else %}<tr><td colspan="8" class="muted">No routes yet.</td></tr>{% endfor %}
-  </tbody>
-</table>
+{% extends "base.html" %}{% block title %}Route Planner{% endblock %}
+{% block content %}
+<h3 class="mb-3">Route Planner</h3>
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h5>Build a route</h5>
+      <form method="post" action="{{ url_for('routes_build') }}">
+        <div class="mb-2"><label class="form-label">Driver</label>
+          <select class="form-select" name="driver_id" required>
+            {% for d in drivers %}<option value="{{ d.id }}">{{ d.name }} ({{ d.status }})</option>{% endfor %}
+          </select>
+        </div>
+        <label class="form-label">Unassigned orders (nearest-neighbour optimised on save)</label>
+        <div class="border rounded p-2" style="max-height:280px;overflow-y:auto">
+          {% for o in unassigned %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="order_ids" value="{{ o.id }}" id="o{{ o.id }}">
+            <label class="form-check-label" for="o{{ o.id }}">{{ o.reference }} — {{ o.customer.name }} — {{ o.delivery_postcode }}</label>
+          </div>
+          {% else %}<p class="text-muted">No unassigned orders.</p>{% endfor %}
+        </div>
+        <button class="btn btn-primary mt-3" type="submit">Build &amp; Optimise Route</button>
+      </form>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <h5>Active routes by driver</h5>
+    {% for d in drivers %}
+    <div class="card p-3 mb-2">
+      <div class="d-flex justify-content-between">
+        <b>{{ d.name }}</b>
+        <form method="post" action="{{ url_for('routes_reoptimise', driver_id=d.id) }}">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Re-optimise</button>
+        </form>
+      </div>
+      <ol class="mb-0">
+        {% for o in active_by_driver[d.id] %}
+        <li>{{ o.reference }} — {{ o.delivery_postcode }} <span class="badge bg-secondary badge-status">{{ o.status }}</span></li>
+        {% else %}<li class="text-muted">No active stops.</li>{% endfor %}
+      </ol>
+    </div>
+    {% endfor %}
+  </div>
 </div>
 {% endblock %}

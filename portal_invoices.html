@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block title %}Invoices{% endblock %}
+{% block content %}
+<h3 class="mb-3">Invoices</h3>
+<div class="card p-3">
+  <table class="table table-sm">
+    <thead><tr><th>Number</th><th>Period</th><th>Total</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for i in invoices %}
+    <tr><td>{{ i.invoice_number }}</td><td>{{ i.period_start }} – {{ i.period_end }}</td>
+      <td>£{{ '%.2f'|format(i.total) }}</td><td>{{ i.status }}</td>
+      <td><a href="{{ url_for('portal_invoice_detail', invoice_id=i.id) }}">View</a></td></tr>
+    {% else %}<tr><td colspan="5" class="text-muted">No invoices yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

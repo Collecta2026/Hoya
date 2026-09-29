@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block title %}Print Run Sheet{% endblock %}
+{% block content %}
+<h3 class="mb-3">Print Run Sheet</h3>
+<div class="card p-3" style="max-width:420px">
+  <form method="get" action="">
+    <div class="mb-2"><label class="form-label">Driver</label>
+      <select class="form-select" id="driverSel">
+        {% for d in drivers %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="mb-2"><label class="form-label">Date</label>
+      <input type="date" class="form-control" id="dateSel" value="{{ today }}">
+    </div>
+    <button type="button" class="btn btn-primary" id="goBtn">Generate run sheet</button>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("goBtn").addEventListener("click", function() {
+  var driver = document.getElementById("driverSel").value;
+  var date = document.getElementById("dateSel").value;
+  window.open("/runsheet/" + driver + "?date=" + date, "_blank");
+});
+</script>
+{% endblock %}

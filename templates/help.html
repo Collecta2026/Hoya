@@ -15,6 +15,9 @@
       <li><a href="#invoicing">Invoicing</a></li>
       <li><a href="#kpi">Insights / KPIs</a></li>
       <li><a href="#scanning">Barcode scanning</a></li>
+      <li><a href="#printing">Run sheets &amp; bulk labels</a></li>
+      <li><a href="#employees">Employees</a></li>
+      <li><a href="#cod-signing">COD &amp; contactless signing</a></li>
       {% endif %}
       {% if role == 'driver' %}
       <li><a href="#driver">Using the driver app</a></li>
@@ -38,6 +41,13 @@
 
 {% if role in ['admin','dispatcher'] %}
 <div class="card p-4 mb-3 help-anchor" id="orders">
+  <h4>Adding employees, customers and orders on their behalf</h4>
+  <p>Dispatchers and admins can create orders for any customer directly — go to <b>Operations → New Order</b>,
+  or open <b>Customers → Customer List</b> and click <b>Place order</b> next to a customer to jump straight
+  into the order form with them pre-selected. This is how staff take a phone/email order and enter it on the
+  customer's behalf, separate from the customer placing their own order via the portal.</p>
+</div>
+<div class="card p-4 mb-3 help-anchor" id="orders-detail">
   <h4>Creating &amp; managing orders</h4>
   <p><b>New Order</b> (Operations → New Order) captures a delivery or collection job: addresses, contact
   details, pallets/parcels, weight, scheduling (collection/delivery date, same-day/48h/booked timing) and
@@ -106,6 +116,39 @@
   app, each stop has a built-in scan gate: a stop can't be marked complete until every box on that order has
   been scanned, unless the driver explicitly overrides with "complete with items missing" (which flags the
   missing items on the order).</p>
+</div>
+
+<div class="card p-4 mb-3 help-anchor" id="printing">
+  <h4>Run sheets &amp; bulk label printing</h4>
+  <p><b>Operations → Print Run Sheet</b> generates a printable, driver-and-date-specific manifest — every
+  stop for that driver on that day, with a barcode per stop, a COD column, and blank space to note anything
+  by hand. This is the paper backup for when a phone/tablet isn't practical.</p>
+  <p><b>Operations → Bulk Print Labels</b> picks a date and prints every pallet/parcel barcode label for
+  every order scheduled (collection or delivery) on that date in one go — the same idea as exporting
+  shipping labels for a day's jobs, rather than printing one order's labels at a time.</p>
+</div>
+
+<div class="card p-4 mb-3 help-anchor" id="employees">
+  <h4>Employees</h4>
+  <p>Admins only: <b>Employees</b> in the top nav lists every staff (dispatcher/admin) account. Add a new
+  one with a name, email, password and role, deactivate an account instantly (it can't be used to log in
+  again until reactivated), or reset someone's password. You can't deactivate your own account. This is
+  separate from <b>Fleet → Drivers &amp; Vehicles</b>, which manages the delivery drivers themselves (PIN
+  login to the driver app, not email/password staff accounts).</p>
+</div>
+
+<div class="card p-4 mb-3 help-anchor" id="cod-signing">
+  <h4>Cash on delivery &amp; contactless signing</h4>
+  <p>Set a <b>cash on delivery amount</b> when creating an order (dispatcher form or customer portal) to
+  flag that payment is due on arrival. The driver app shows a "collected £X" checkbox on that stop, and it's
+  tracked on the order and visible on run sheets.</p>
+  <p>When an order is marked <b>In Transit</b>, Hoya automatically texts the customer a link to a
+  <b>contactless signing page</b> — they can confirm delivery, sign, and confirm COD collection from their
+  own phone, instead of signing the driver's device. You can also find this link on the order's detail page
+  at any time. If the recipient reports a problem instead of confirming, that's logged as a delivery
+  exception the same way a driver-reported one would be.</p>
+  <p class="text-muted small">Note: driver location on the order page is a one-off "last known position"
+  ping taken when the driver opens a stop, not continuous live GPS tracking on a map.</p>
 </div>
 {% endif %}
 

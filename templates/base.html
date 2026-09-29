@@ -30,6 +30,9 @@
             <li><a class="dropdown-item" href="{{ url_for('routes_list') }}">Route Planner</a></li>
             <li><a class="dropdown-item" href="{{ url_for('pending_board') }}">Pending Work Board</a></li>
             <li><a class="dropdown-item" href="{{ url_for('scan_standalone') }}">Scanner</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{{ url_for('runsheet_picker') }}">Print Run Sheet</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('labels_bulk_picker') }}">Bulk Print Labels</a></li>
           </ul>
         </li>
         <li class="nav-item dropdown">
@@ -55,6 +58,9 @@
           </ul>
         </li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('kpi_dashboard') }}">Insights</a></li>
+        {% if current_user.role == 'admin' %}
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('employees_list') }}">Employees</a></li>
+        {% endif %}
         {% endif %}
         {% if current_user.role == 'driver' %}
         <li class="nav-item"><a class="nav-link" href="{{ url_for('driver_home') }}">My Route</a></li>

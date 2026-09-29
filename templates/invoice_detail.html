@@ -1,60 +1,36 @@
-{% extends "base.html" %}
-{% block title %}{{ inv.ref }}{% endblock %}
-{% block body %}
-<div class="inv-head" style="margin-bottom:1rem">
-  <div>
-    <h1 style="margin-bottom:.2rem">Invoice {{ inv.ref }}</h1>
-    <p class="muted small" style="margin:0">
-      {{ inv.customer.name }}<br>
-      Period {{ inv.period_start.strftime('%d %b %Y') }} – {{ inv.period_end.strftime('%d %b %Y') }}<br>
-      Issued {{ inv.issue_date.strftime('%d %b %Y') }}
-    </p>
-  </div>
-  <div class="inv-tot">
-    <span class="pill {{ 'delivered' if inv.status=='paid' else ('out' if inv.status=='sent' else 'pending') }}">{{ inv.status }}</span>
-    <div class="grand">£{{ '%.2f'|format(inv.total) }}</div>
-    <div class="small muted">inc VAT</div>
-    {% if not portal %}
-    <form method="post" action="{{ url_for('invoice_status', iid=inv.id) }}" class="actions" style="justify-content:flex-end;margin-top:.5rem">
-      <button class="btn sm ghost" name="status" value="sent">Mark sent</button>
-      <button class="btn sm teal" name="status" value="paid">Mark paid</button>
-    </form>
-    {% endif %}
-  </div>
-</div>
-
-<div class="card">
-  <table>
-    <thead>
-      <tr><th>Date</th><th>Shipment</th><th>Collection</th><th>Delivery</th><th>Plt</th><th>Kg</th><th>Carriage</th><th>Surcharges</th><th>Line total</th><th>POD</th></tr>
-    </thead>
+{% extends "base.html" %}{% block title %}{{ invoice.invoice_number }}{% endblock %}
+{% block content %}
+<h3>{{ invoice.invoice_number }} — {{ invoice.customer.name }}</h3>
+<p class="text-muted">Period {{ invoice.period_start }} – {{ invoice.period_end }} &middot; Status: {{ invoice.status }}</p>
+{% if current_user.role in ['admin','dispatcher'] %}
+<form method="post" action="{{ url_for('invoice_set_status', invoice_id=invoice.id) }}" class="mb-3">
+  <select name="status" class="form-select d-inline w-auto" onchange="this.form.submit()">
+    <option value="draft" {% if invoice.status=='draft' %}selected{% endif %}>Draft</option>
+    <option value="sent" {% if invoice.status=='sent' %}selected{% endif %}>Sent</option>
+    <option value="paid" {% if invoice.status=='paid' %}selected{% endif %}>Paid</option>
+  </select>
+</form>
+{% endif %}
+<div class="card p-3">
+  <table class="table table-sm">
+    <thead><tr><th>Ref</th><th>Route</th><th>Pallets</th><th>Weight</th><th>Price</th><th>POD</th></tr></thead>
     <tbody>
-    {% for l in inv.lines %}
-      <tr>
-        <td class="small">{{ l.ship_date.strftime('%d %b') if l.ship_date else '' }}</td>
-        <td class="mono">{{ l.order_ref }}</td>
-        <td class="small">{{ l.collection or '' }}<br><span class="muted">{{ l.collection_pc or '' }}</span></td>
-        <td class="small">{{ l.delivery or '' }}<br><span class="muted">{{ l.delivery_pc or '' }}</span></td>
-        <td>{{ l.pallets }}</td>
-        <td>{{ '%.0f'|format(l.weight_kg or 0) }}</td>
-        <td>£{{ '%.2f'|format(l.carriage) }}</td>
-        <td class="small">{% if l.surcharge_amount %}£{{ '%.2f'|format(l.surcharge_amount) }}<br><span class="muted">{{ l.surcharge_detail }}</span>{% else %}—{% endif %}</td>
-        <td>£{{ '%.2f'|format(l.line_total) }}</td>
-        <td>{% if l.pod_ref %}<a href="{{ host }}pod/ref/{{ l.pod_ref }}" target="_blank">View</a>{% else %}—{% endif %}</td>
-      </tr>
+    {% for o in invoice.orders %}
+    <tr>
+      <td>{{ o.reference }}</td>
+      <td>{{ o.collection_postcode }} → {{ o.delivery_postcode }}</td>
+      <td>{{ o.pallets }}</td><td>{{ o.total_weight_kg }} kg</td>
+      <td>£{{ '%.2f'|format((o.quoted_price or 0) + o.surcharges|sum(attribute='amount')) }}</td>
+      <td><a href="{{ url_for('pod_public', reference=o.reference) }}" target="_blank">View</a></td>
+    </tr>
     {% endfor %}
     </tbody>
   </table>
-
-  <table style="margin-top:1rem;max-width:340px;margin-left:auto">
-    <tbody>
-      <tr class="totrow"><td>Carriage</td><td style="text-align:right">£{{ '%.2f'|format(inv.carriage) }}</td></tr>
-      <tr class="totrow"><td>Surcharges</td><td style="text-align:right">£{{ '%.2f'|format(inv.surcharge_total) }}</td></tr>
-      <tr class="totrow"><td>Fuel surcharge ({{ '%.0f'|format(inv.fuel_surcharge_pct) }}%)</td><td style="text-align:right">£{{ '%.2f'|format(inv.fuel_surcharge) }}</td></tr>
-      <tr class="totrow"><td>Subtotal (ex VAT)</td><td style="text-align:right">£{{ '%.2f'|format(inv.subtotal) }}</td></tr>
-      <tr class="totrow"><td>VAT (20%)</td><td style="text-align:right">£{{ '%.2f'|format(inv.vat) }}</td></tr>
-      <tr class="totrow grand"><td>Total due</td><td style="text-align:right">£{{ '%.2f'|format(inv.total) }}</td></tr>
-    </tbody>
+  <table class="table table-sm w-auto ms-auto">
+    <tr><th>Subtotal</th><td>£{{ '%.2f'|format(invoice.subtotal) }}</td></tr>
+    <tr><th>Fuel surcharge</th><td>£{{ '%.2f'|format(invoice.fuel_surcharge) }}</td></tr>
+    <tr><th>VAT</th><td>£{{ '%.2f'|format(invoice.vat) }}</td></tr>
+    <tr><th>Total</th><td><b>£{{ '%.2f'|format(invoice.total) }}</b></td></tr>
   </table>
 </div>
 {% endblock %}

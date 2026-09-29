@@ -1,33 +1,49 @@
-{% extends "base.html" %}
-{% block title %}Customers{% endblock %}
-{% block body %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-  <h1>Customers &amp; rate cards</h1>
-  <div class="actions">
-    <a class="btn ghost sm" href="{{ url_for('rate_template') }}">Download rate-card template</a>
-    <a class="btn" href="{{ url_for('customer_edit') }}">+ New customer</a>
+{% extends "base.html" %}{% block title %}Customers{% endblock %}
+{% block content %}
+<h3 class="mb-3">Customers</h3>
+<div class="row g-3">
+  <div class="col-md-7">
+    <div class="card p-3">
+      <table class="table table-sm">
+        <thead><tr><th>Name</th><th>Pricing</th><th>Discount</th><th>Zone</th></tr></thead>
+        <tbody>
+        {% for c in customers %}
+        <tr><td>{{ c.name }}</td><td>{{ c.pricing_mode }}</td><td>{{ c.discount_pct }}%</td><td>{{ c.zone.name if c.zone else '—' }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
-</div>
-<div class="card">
-  <form method="post" action="{{ url_for('rate_import') }}" enctype="multipart/form-data" class="inline">
-    <div style="flex:1"><label style="margin-top:0">Bulk upload rate cards (CSV)</label>
-      <input type="file" name="file" accept=".csv" required></div>
-    <button class="btn teal">Import</button>
-  </form>
-  <p class="small muted" style="margin-top:.5rem">Download the template above, fill one row per customer, and upload it here to create or update rate cards in bulk.</p>
-</div>
-<div class="card">
-<table>
-  <thead><tr><th>Customer</th><th>Contact</th><th>Base £/drop</th><th>£/mile</th><th>£/pallet</th><th>Fuel %</th><th>Portal code</th><th></th></tr></thead>
-  <tbody>
-  {% for c in customers %}
-    <tr><td><b>{{ c.name }}</b><br><span class="small muted">{{ c.postcode }}</span></td>
-    <td>{{ c.contact_name or '—' }}<br><span class="small muted">{{ c.phone or '' }}</span></td>
-    <td>£{{ '%.2f'|format(c.rate_base) }}</td><td>£{{ '%.2f'|format(c.rate_per_mile) }}</td>
-    <td>£{{ '%.2f'|format(c.rate_per_pallet) }}</td><td>{{ '%.0f'|format(c.fuel_surcharge_pct or 0) }}%</td><td class="mono">{{ c.portal_code }}</td>
-    <td><a class="btn sm ghost" href="{{ url_for('customer_edit', cid=c.id) }}">Edit</a></td></tr>
-  {% else %}<tr><td colspan="8" class="muted">No customers.</td></tr>{% endfor %}
-  </tbody>
-</table>
+  <div class="col-md-5">
+    <div class="card p-3">
+      <h5>Add customer</h5>
+      <form method="post" action="{{ url_for('customer_new') }}">
+        <div class="mb-2"><label class="form-label">Name</label><input class="form-control" name="name" required></div>
+        <div class="mb-2"><label class="form-label">Email</label><input class="form-control" name="email"></div>
+        <div class="mb-2"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
+        <div class="mb-2"><label class="form-label">Billing address</label><input class="form-control" name="billing_address"></div>
+        <div class="mb-2"><label class="form-label">Pricing mode</label>
+          <select class="form-select" name="pricing_mode" id="pm">
+            <option value="standard">Standard (rate engine + discount)</option>
+            <option value="flat">Flat rate per pallet</option>
+          </select>
+        </div>
+        <div class="mb-2"><label class="form-label">Discount % (standard mode)</label>
+          <input type="number" step="0.1" class="form-control" name="discount_pct" value="0"></div>
+        <div class="mb-2"><label class="form-label">Flat £ per pallet (flat mode)</label>
+          <input type="number" step="0.01" class="form-control" name="flat_rate_per_pallet" value="25"></div>
+        <div class="mb-2"><label class="form-label">Zone</label>
+          <select class="form-select" name="zone_id">
+            <option value="">None</option>
+            {% for z in zones %}<option value="{{ z.id }}">{{ z.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <hr>
+        <div class="mb-2"><label class="form-label">Portal login email (optional)</label><input class="form-control" name="portal_email"></div>
+        <div class="mb-2"><label class="form-label">Portal password</label><input class="form-control" name="portal_password" placeholder="changeme123"></div>
+        <button class="btn btn-primary" type="submit">Add customer</button>
+      </form>
+    </div>
+  </div>
 </div>
 {% endblock %}

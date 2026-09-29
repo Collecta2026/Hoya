@@ -1,140 +1,111 @@
-"""Route sequencing and light geocoding.
-
-No external API required: a table of UK outward-code centroids gives every
-postcode an approximate lat/lng, then a nearest-neighbour pass orders the
-stops from the depot. Good enough to remove backtracking on a multidrop
-round. Swap in a real routing API later by replacing `optimise_sequence`.
 """
-import math
+Route sequencing and postcode-zone helpers.
+No external mapping API key required: stops are sequenced by nearest-neighbour
+over approximate UK postcode *outward code* centroids (e.g. "SW1", "M1", "EH3").
+This mirrors the approach used on the previous build of this platform.
+"""
 import re
+import math
 
-# Approximate lat/lng for common UK postcode areas / outward codes.
-# Keyed by the leading letters of the outward code (the "area").
+# Approximate lat/lng centroids for common UK outward-code areas (first letters
+# of the postcode, e.g. "SW", "EC", "M", "B", "LS"...). Good enough for
+# clustering/sequencing multi-drop routes without a paid geocoding API.
 AREA_CENTROIDS = {
-    "PR": (53.76, -2.70), "BB": (53.75, -2.48), "BL": (53.58, -2.43),
-    "FY": (53.82, -3.02), "L": (53.41, -2.99), "WA": (53.39, -2.60),
-    "WN": (53.55, -2.63), "M": (53.48, -2.24), "OL": (53.55, -2.11),
-    "SK": (53.36, -2.16), "CW": (53.16, -2.44), "CH": (53.20, -2.89),
-    "ST": (52.99, -2.18), "TF": (52.68, -2.44), "SY": (52.71, -2.75),
-    "WV": (52.59, -2.13), "DE": (52.92, -1.48), "NG": (52.95, -1.15),
-    "LE": (52.63, -1.13), "B": (52.48, -1.90), "CV": (52.41, -1.51),
-    "NN": (52.24, -0.90), "MK": (52.04, -0.76), "OX": (51.75, -1.26),
-    "RG": (51.46, -1.00), "SP": (51.07, -1.79), "HP": (51.71, -0.75),
-    "LU": (51.88, -0.42), "WR": (52.19, -2.22), "GL": (51.86, -2.24),
-    "HR": (52.06, -2.72), "LD": (52.24, -3.38), "CF": (51.48, -3.18),
-    "SA": (51.62, -3.94), "NP": (51.58, -2.99), "LS": (53.80, -1.55),
-    "BD": (53.79, -1.75), "HX": (53.72, -1.86), "HD": (53.65, -1.78),
-    "WF": (53.68, -1.50), "S": (53.38, -1.47), "DN": (53.52, -1.13),
-    "YO": (53.96, -1.08), "HU": (53.74, -0.33), "CA": (54.65, -2.93),
-    "LA": (54.05, -2.80), "DL": (54.53, -1.55), "TS": (54.57, -1.23),
-    "NE": (54.98, -1.61), "SR": (54.90, -1.38), "DH": (54.78, -1.58),
-    "CB": (52.20, 0.12), "PE": (52.57, -0.24), "NR": (52.63, 1.30),
-    "IP": (52.06, 1.16), "CO": (51.89, 0.90), "CM": (51.73, 0.47),
-    "SG": (51.90, -0.20), "AL": (51.75, -0.34), "WD": (51.66, -0.40),
-    "EN": (51.65, -0.08), "HA": (51.58, -0.34), "UB": (51.53, -0.42),
-    "TW": (51.45, -0.37), "KT": (51.35, -0.29), "SM": (51.36, -0.19),
-    "CR": (51.35, -0.09), "BR": (51.40, 0.02), "DA": (51.44, 0.22),
-    "SE": (51.47, -0.05), "SW": (51.46, -0.17), "N": (51.56, -0.11),
-    "E": (51.53, -0.03), "W": (51.51, -0.22), "NW": (51.55, -0.20),
-    "EC": (51.52, -0.09), "WC": (51.52, -0.12), "GU": (51.24, -0.59),
-    "RH": (51.10, -0.19), "TN": (51.13, 0.27), "ME": (51.35, 0.52),
-    "CT": (51.28, 1.08), "BN": (50.83, -0.14), "PO": (50.82, -1.09),
-    "SO": (50.92, -1.40), "BH": (50.74, -1.88), "DT": (50.71, -2.44),
-    "TA": (51.02, -3.10), "BS": (51.45, -2.59), "BA": (51.28, -2.36),
-    "EX": (50.72, -3.53), "PL": (50.37, -4.14), "TQ": (50.46, -3.53),
-    "TR": (50.26, -5.05),
+    "E": (51.5285, -0.0212), "EC": (51.5178, -0.0913), "N": (51.5619, -0.1099),
+    "NW": (51.5432, -0.1850), "SE": (51.4783, -0.0508), "SW": (51.4820, -0.1610),
+    "W": (51.5140, -0.1900), "WC": (51.5170, -0.1230),
+    "M": (53.4808, -2.2426), "B": (52.4862, -1.8904), "L": (53.4084, -2.9916),
+    "LS": (53.8008, -1.5491), "S": (53.3811, -1.4701), "SW1": (51.4975, -0.1357),
+    "BS": (51.4545, -2.5879), "NE": (54.9783, -1.6178), "CF": (51.4816, -3.1791),
+    "EH": (55.9533, -3.1883), "G": (55.8642, -4.2518), "NG": (52.9548, -1.1581),
+    "LE": (52.6369, -1.1398), "CV": (52.4068, -1.5197), "OX": (51.7520, -1.2577),
+    "CB": (52.2053, 0.1218), "NR": (52.6309, 1.2974), "PE": (52.5695, -0.2405),
+    "PL": (50.3755, -4.1427), "EX": (50.7184, -3.5339), "TR": (50.2632, -5.0510),
+    "BN": (50.8225, -0.1372), "PO": (50.8198, -1.0880), "RG": (51.4543, -0.9781),
+    "SN": (51.5558, -1.7797), "GL": (51.8642, -2.2380), "HR": (52.0567, -2.7160),
+    "WR": (52.1920, -2.2210), "ST": (52.9821, -2.1450), "DE": (52.9225, -1.4746),
+    "SK": (53.4083, -2.1494), "WA": (53.3900, -2.5970), "PR": (53.7632, -2.7031),
+    "BB": (53.7477, -2.4867), "BD": (53.7960, -1.7594), "HD": (53.6458, -1.7850),
+    "HX": (53.7220, -1.8600), "WF": (53.6833, -1.4977), "YO": (53.9600, -1.0873),
+    "HU": (53.7457, -0.3367), "DN": (53.5228, -1.1285), "DL": (54.5238, -1.5540),
+    "SR": (54.9069, -1.3838), "DH": (54.7761, -1.5760), "TS": (54.5742, -1.2350),
+    "CA": (54.8951, -2.9382), "LA": (54.0466, -2.8007), "KA": (55.6110, -4.4960),
+    "PA": (55.8600, -4.4300), "ML": (55.7770, -3.9840), "FK": (56.0019, -3.7839),
+    "DD": (56.4620, -2.9707), "AB": (57.1497, -2.0943), "IV": (57.4778, -4.2247),
+    "KY": (56.1165, -3.1590), "TD": (55.5960, -2.7800), "DG": (55.0709, -3.6050),
+    "SA": (51.6214, -3.9436), "NP": (51.5842, -2.9977), "LD": (52.2440, -3.3860),
+    "SY": (52.7100, -2.7530), "LL": (53.2270, -3.8360), "CH": (53.1900, -2.8900),
+    "WN": (53.5450, -2.6318), "OL": (53.5409, -2.1114), "BL": (53.5769, -2.4280),
+    "PR1": (53.7632, -2.7031), "IP": (52.0567, 1.1482), "CO": (51.8959, 0.8919),
+    "SS": (51.5459, 0.7077), "CM": (51.7356, 0.4685), "AL": (51.7520, -0.3360),
+    "HP": (51.6290, -0.7480), "LU": (51.8787, -0.4200), "MK": (52.0406, -0.7594),
+    "NN": (52.2405, -0.9027), "DA": (51.4460, 0.2150), "ME": (51.3730, 0.5060),
+    "CT": (51.2802, 1.0789), "TN": (51.1330, 0.2610), "GU": (51.2362, -0.5704),
+    "KT": (51.4085, -0.3064), "SL": (51.5105, -0.5950), "TW": (51.4479, -0.3260),
+    "UB": (51.5380, -0.4780), "HA": (51.5793, -0.3370), "EN": (51.6520, -0.0810),
+    "IG": (51.5590, 0.0810), "RM": (51.5770, 0.1830), "CR": (51.3762, -0.0982),
+    "SM": (51.3600, -0.1960), "BR": (51.4040, 0.0140), "WD": (51.6560, -0.4200),
 }
-DEPOT_DEFAULT = (53.76, -2.70)  # Preston PR
+
+DEFAULT_CENTROID = (52.5, -1.5)  # roughly the centre of England, used as a fallback
 
 
-def _area(postcode):
+def area_of(postcode):
+    """Extract the outward-code area letters, e.g. 'SW1A 1AA' -> 'SW'."""
     if not postcode:
         return None
-    pc = postcode.strip().upper()
-    m = re.match(r"^([A-Z]{1,2})", pc)
+    pc = postcode.strip().upper().replace(" ", "")
+    m = re.match(r"^([A-Z]{1,2})\d", pc)
     return m.group(1) if m else None
 
 
-def geocode(postcode):
-    """Return (lat, lng) for a postcode, approximated from its area."""
-    area = _area(postcode)
-    if area and area in AREA_CENTROIDS:
-        return AREA_CENTROIDS[area]
-    # try single-letter fallback (e.g. 'M4' area 'M')
-    if area and len(area) == 2 and area[0] in AREA_CENTROIDS:
-        return AREA_CENTROIDS[area[0]]
-    return None
-
-
-def haversine(a, b):
-    lat1, lon1 = a
-    lat2, lon2 = b
-    r = 3958.8  # miles
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(h))
-
-
-def optimise_sequence(stops, start_postcode="PR2 2TE"):
-    """Order a list of stop-like objects (need .order.postcode) by nearest
-    neighbour from the depot. Returns the reordered list plus total miles.
-    """
-    depot = geocode(start_postcode) or DEPOT_DEFAULT
-    pts = []
-    for s in stops:
-        pc = s.order.postcode if s.order else None
-        pts.append((s, geocode(pc) or depot))
-
-    remaining = list(pts)
-    ordered = []
-    cur = depot
-    total = 0.0
-    while remaining:
-        remaining.sort(key=lambda x: haversine(cur, x[1]))
-        nxt = remaining.pop(0)
-        total += haversine(cur, nxt[1])
-        ordered.append(nxt[0])
-        cur = nxt[1]
-    return ordered, round(total, 1)
-
-
-# UK postcode area -> region (for zone-based rate multipliers)
-REGION_OF = {
-    "PR": "North West", "BB": "North West", "BL": "North West", "FY": "North West",
-    "L": "North West", "WA": "North West", "WN": "North West", "M": "North West",
-    "OL": "North West", "SK": "North West", "CW": "North West", "CH": "North West",
-    "LA": "North West", "CA": "North West",
-    "NE": "North East", "SR": "North East", "DH": "North East", "DL": "North East",
-    "TS": "North East",
-    "LS": "Yorkshire", "BD": "Yorkshire", "HX": "Yorkshire", "HD": "Yorkshire",
-    "WF": "Yorkshire", "S": "Yorkshire", "DN": "Yorkshire", "YO": "Yorkshire",
-    "HU": "Yorkshire",
-    "DE": "East Midlands", "NG": "East Midlands", "LE": "East Midlands",
-    "NN": "East Midlands",
-    "B": "West Midlands", "CV": "West Midlands", "WV": "West Midlands",
-    "ST": "West Midlands", "TF": "West Midlands", "SY": "West Midlands",
-    "WR": "West Midlands", "HR": "West Midlands", "GL": "West Midlands",
-    "CF": "Wales", "SA": "Wales", "NP": "Wales", "LD": "Wales",
-    "BS": "South West", "BA": "South West", "TA": "South West", "EX": "South West",
-    "PL": "South West", "TQ": "South West", "TR": "South West", "DT": "South West",
-    "SP": "South West", "BH": "South West",
-    "OX": "South East", "RG": "South East", "GU": "South East", "RH": "South East",
-    "TN": "South East", "ME": "South East", "CT": "South East", "BN": "South East",
-    "PO": "South East", "SO": "South East", "SL": "South East", "HP": "South East",
-    "LU": "South East", "MK": "South East", "AL": "South East", "SG": "South East",
-    "CB": "East", "PE": "East", "NR": "East", "IP": "East", "CO": "East", "CM": "East",
-    "E": "London", "EC": "London", "N": "London", "NW": "London", "SE": "London",
-    "SW": "London", "W": "London", "WC": "London", "BR": "London", "CR": "London",
-    "DA": "London", "EN": "London", "HA": "London", "KT": "London", "SM": "London",
-    "TW": "London", "UB": "London", "WD": "London",
-}
-REGIONS = ["North West", "North East", "Yorkshire", "East Midlands",
-           "West Midlands", "Wales", "South West", "South East", "East",
-           "London", "Other"]
+def centroid_of(postcode):
+    area = area_of(postcode)
+    return AREA_CENTROIDS.get(area, DEFAULT_CENTROID)
 
 
 def region_of(postcode):
-    a = _area(postcode)
-    return REGION_OF.get(a, "Other")
+    """Human-readable-ish region label, used by the rate engine for zone lookup."""
+    return area_of(postcode) or "UNKNOWN"
+
+
+def haversine_km(a, b):
+    R = 6371.0
+    lat1, lng1 = a
+    lat2, lng2 = b
+    d_lat = math.radians(lat2 - lat1)
+    d_lng = math.radians(lng2 - lng1)
+    h = (math.sin(d_lat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lng / 2) ** 2)
+    return 2 * R * math.asin(math.sqrt(h))
+
+
+def optimise_stops(orders, depot_postcode="M1"):
+    """orders: list of Order-like objects with .delivery_postcode (or
+    .collection_postcode for collection jobs). Returns the same list
+    reordered by greedy nearest-neighbour starting from the depot."""
+    def stop_point(o):
+        pc = o.collection_postcode if o.job_type == "collection" else o.delivery_postcode
+        return centroid_of(pc)
+
+    remaining = list(orders)
+    ordered = []
+    current = centroid_of(depot_postcode)
+    while remaining:
+        best_idx, best_dist = 0, float("inf")
+        for i, o in enumerate(remaining):
+            d = haversine_km(current, stop_point(o))
+            if d < best_dist:
+                best_dist, best_idx = d, i
+        nxt = remaining.pop(best_idx)
+        ordered.append(nxt)
+        current = stop_point(nxt)
+    return ordered
+
+
+def round_trip_miles(depot_postcode, postcode):
+    km = haversine_km(centroid_of(depot_postcode), centroid_of(postcode)) * 2  # there and back
+    # straight-line distance underestimates real road distance; apply a
+    # standard routing-inefficiency factor
+    km *= 1.3
+    return km * 0.621371

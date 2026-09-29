@@ -1,0 +1,33 @@
+{% extends "base.html" %}{% block title %}Insights{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>Insights / KPI Dashboard</h3>
+  <div>
+    <div class="btn-group me-2">
+      <a class="btn btn-outline-secondary {{ 'active' if period=='7' }}" href="?period=7">7d</a>
+      <a class="btn btn-outline-secondary {{ 'active' if period=='30' }}" href="?period=30">30d</a>
+      <a class="btn btn-outline-secondary {{ 'active' if period=='90' }}" href="?period=90">90d</a>
+    </div>
+    <a class="btn btn-outline-primary" href="{{ url_for('kpi_export', period=period) }}">Export CSV</a>
+  </div>
+</div>
+<div class="row g-2 mb-4">
+  <div class="col-md-2"><div class="stat-card bg-blue"><p>Total Jobs</p><h3>{{ total_jobs }}</h3></div></div>
+  <div class="col-md-2"><div class="stat-card bg-teal"><p>Deliveries</p><h3>{{ deliveries }}</h3></div></div>
+  <div class="col-md-2"><div class="stat-card bg-teal"><p>Collections</p><h3>{{ collections }}</h3></div></div>
+  <div class="col-md-2"><div class="stat-card bg-orange"><p>Pallets / Parcels</p><h3>{{ total_pallets }}/{{ total_parcels }}</h3></div></div>
+  <div class="col-md-2"><div class="stat-card bg-blue"><p>Success Rate</p><h3>{{ success_rate }}%</h3></div></div>
+  <div class="col-md-2"><div class="stat-card bg-red"><p>DIFOT</p><h3>{{ difot }}%</h3></div></div>
+</div>
+<div class="card p-3">
+  <h5>Per-driver breakdown</h5>
+  <table class="table table-sm">
+    <thead><tr><th>Driver</th><th>Jobs</th><th>Delivered/Collected</th><th>Failed</th><th>Pallets</th></tr></thead>
+    <tbody>
+    {% for name, d in per_driver.items() %}
+    <tr><td>{{ name }}</td><td>{{ d.jobs }}</td><td>{{ d.delivered }}</td><td>{{ d.failed }}</td><td>{{ d.pallets }}</td></tr>
+    {% else %}<tr><td colspan="5" class="text-muted">No data for this period.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

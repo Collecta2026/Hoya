@@ -1,0 +1,37 @@
+{% extends "base.html" %}{% block title %}Scanner{% endblock %}
+{% block content %}
+<h3 class="mb-3">Standalone Scanner</h3>
+<div class="card p-3" style="max-width:420px">
+  <div id="reader" style="width:100%"></div>
+  <div class="input-group mt-2">
+    <input type="text" id="manualCode" class="form-control scan-box" placeholder="Scan or type barcode">
+    <button class="btn btn-primary" id="manualBtn">Look up</button>
+  </div>
+  <div id="result" class="mt-3"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+function lookup(code) {
+  fetch("{{ url_for('scan_lookup') }}", {
+    method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: "barcode=" + encodeURIComponent(code)
+  }).then(r => r.json()).then(data => {
+    var el = document.getElementById("result");
+    if (!data.ok) { el.innerHTML = "<div class='alert alert-danger'>" + data.message + "</div>"; return; }
+    el.innerHTML = "<div class='alert alert-success'>" + data.order_reference + " (" + data.customer + ") — " +
+      data.kind + (data.scanned ? " — already scanned" : " — not yet scanned") +
+      "<br><a href='/orders/" + data.order_id + "'>Open order</a></div>";
+  });
+}
+document.getElementById("manualBtn").addEventListener("click", function() {
+  var v = document.getElementById("manualCode").value.trim();
+  if (v) lookup(v);
+});
+try {
+  var qr = new Html5Qrcode("reader");
+  Html5Qrcode.getCameras().then(cams => {
+    if (cams && cams.length) qr.start({ facingMode: "environment" }, { fps: 10, qrbox: 220 }, (text) => lookup(text));
+  }).catch(() => { document.getElementById("reader").innerHTML = "<p class='text-muted small'>Camera not available — use manual entry.</p>"; });
+} catch (e) {}
+</script>
+{% endblock %}

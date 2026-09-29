@@ -1,0 +1,24 @@
+:root { --hoya-blue: #1450a3; --hoya-dark: #0b3168; }
+body { background: #f4f6fa; }
+.hoya-nav { background: linear-gradient(90deg, var(--hoya-dark), var(--hoya-blue)); }
+.card { border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-radius: 10px; }
+.stat-card { border-radius: 12px; padding: 18px; color: #fff; }
+.stat-card h3 { font-size: 28px; margin: 0; }
+.stat-card p { margin: 0; opacity: 0.85; font-size: 13px; text-transform: uppercase; letter-spacing: .04em;}
+.bg-blue { background: var(--hoya-blue); }
+.bg-teal { background: #0e8a7c; }
+.bg-orange { background: #d97b1f; }
+.bg-red { background: #c0392b; }
+.board-col { background: #fff; border-radius: 10px; padding: 12px; min-height: 240px; }
+.board-col h6 { text-transform: uppercase; font-size: 11px; color: #888; letter-spacing: .05em; }
+.order-card { background: #f9fafc; border: 1px solid #e5e9f0; border-radius: 8px; padding: 10px; margin-bottom: 8px; font-size: 13px; }
+.order-card .ref { color: var(--hoya-blue); font-weight: 700; }
+.badge-status { text-transform: capitalize; }
+.sla-amber { border-left: 4px solid #e0a800 !important; }
+.sla-red { border-left: 4px solid #c0392b !important; }
+.driver-pin-btn { width: 100%; padding: 14px; font-size: 16px; }
+.scan-box { font-family: monospace; font-size: 18px; }
+.help-anchor { scroll-margin-top: 80px; }
+.big-btn { font-size: 18px; padding: 16px; }
+.label-tile { width: 380px; border: 2px dashed #444; padding: 14px; margin: 10px; display: inline-block; }
+@media print { .no-print { display: none !important; } }

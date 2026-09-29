@@ -1,75 +1,114 @@
-{% extends "base.html" %}
-{% block title %}{{ o.ref }}{% endblock %}
-{% block body %}
-{% set sc, sl = sla %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-  <h1>{{ o.ref }} <span class="muted" style="font-size:1rem">{{ o.job_type }}</span></h1>
-  <div class="actions">
-    {% if sl and sl!='on time' %}<span class="slatag {{ sc }}">{{ sl }}</span>{% endif %}
-    <span class="pill {{ o.status }}">{{ o.status }}</span>
-    <a class="btn ghost sm" href="{{ url_for('order_label', oid=o.id) }}">Print labels</a>
-  </div>
+{% extends "base.html" %}{% block title %}Order {{ order.reference }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>{{ order.reference }} <span class="badge bg-secondary badge-status">{{ status_labels[order.status] }}</span></h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('order_label', order_id=order.id) }}" target="_blank">Print Labels</a>
 </div>
+<div class="row g-3">
+  <div class="col-md-7">
+    <div class="card p-3 mb-3">
+      <h5>Shipment details</h5>
+      <table class="table table-sm">
+        <tr><th>Customer</th><td>{{ order.customer.name }}</td></tr>
+        <tr><th>Job type</th><td>{{ order.job_type }}</td></tr>
+        <tr><th>Collection</th><td>{{ order.collection_address }} ({{ order.collection_postcode }})</td></tr>
+        <tr><th>Delivery</th><td>{{ order.delivery_address }} ({{ order.delivery_postcode }})</td></tr>
+        <tr><th>Contact</th><td>{{ order.contact_name }} — {{ order.contact_phone }}</td></tr>
+        <tr><th>Pallets / Parcels</th><td>{{ order.pallets }} / {{ order.parcels }} ({{ order.total_weight_kg }} kg)</td></tr>
+        <tr><th>Schedule</th><td>Collect {{ order.collection_date or '—' }} · Deliver {{ order.delivery_date or '—' }} · {{ order.timing }}</td></tr>
+        <tr><th>Quoted price</th><td>£{{ '%.2f'|format(order.quoted_price or 0) }}</td></tr>
+        <tr><th>Notes</th><td>{{ order.notes or '—' }}</td></tr>
+      </table>
+    </div>
 
-<div class="split">
-  <div class="card">
-    <h2>Shipment</h2>
-    <table>
-      <tr><td class="muted">Customer</td><td>{{ o.customer.name }}</td></tr>
-      <tr><td class="muted">Contact</td><td>{{ o.recipient or '—' }} · {{ o.phone or '' }}</td></tr>
-      <tr><td class="muted">Collection</td><td>{{ o.collection_address }}<br><b>{{ o.collection_postcode }}</b></td></tr>
-      <tr><td class="muted">Delivery</td><td>{{ o.delivery_address }}<br><b>{{ o.delivery_postcode }}</b></td></tr>
-      <tr><td class="muted">Collection date</td><td>{{ o.collection_date.strftime('%a %d %b') if o.collection_date else '—' }} {{ o.collection_time or '' }}</td></tr>
-      <tr><td class="muted">Delivery date</td><td>{{ o.delivery_date.strftime('%a %d %b') if o.delivery_date else '—' }} <span class="muted small">({{ o.timing }})</span></td></tr>
-      <tr><td class="muted">Service</td><td>{{ o.service }}</td></tr>
-      <tr><td class="muted">Goods</td><td>{{ o.pallet_count }} pallet(s) · {{ o.parcels }} parcel(s) · {{ '%.0f'|format(o.weight_kg or 0) }} kg</td></tr>
-      {% if o.weight_per_pallet or o.pallet_length %}<tr><td class="muted">Pallet spec</td><td>{{ '%.0f'|format(o.weight_per_pallet or 0) }} kg/pallet · {{ '%.0f'|format(o.pallet_length or 0) }}×{{ '%.0f'|format(o.pallet_width or 0) }}×{{ '%.0f'|format(o.pallet_height or 0) }} cm</td></tr>{% endif %}
-      <tr><td class="muted">Charge</td><td>£{{ '%.2f'|format(o.price or 0) }}</td></tr>
-      {% if o.notes %}<tr><td class="muted">Notes</td><td>{{ o.notes }}</td></tr>{% endif %}
-    </table>
-  </div>
-  <div class="card">
-    <h2>Allocation</h2>
-    <form method="post" action="{{ url_for('pending_allocate', oid=o.id) }}">
-      <label>Driver</label>
-      <select name="driver_id"><option value="">—</option>
-        {% for d in drivers %}<option value="{{ d.id }}" {{ 'selected' if o.assigned_driver_id==d.id }}>{{ d.user.name }} ({{ d.status }})</option>{% endfor %}</select>
-      <label>Van</label>
-      <select name="vehicle_id"><option value="">—</option>
-        {% for v in vehicles %}<option value="{{ v.id }}" {{ 'selected' if o.assigned_vehicle_id==v.id }}>{{ v.reg }} · {{ v.vtype }} · {{ v.capacity_pallets }} plt ({{ v.status }})</option>{% endfor %}</select>
-      <button class="btn block" style="margin-top:.7rem">Save allocation</button>
-    </form>
-    <form method="post" action="{{ url_for('pending_suggest', oid=o.id) }}" style="margin-top:.5rem">
-      <button class="btn ghost block">Suggest van &amp; driver</button></form>
+    <div class="card p-3 mb-3">
+      <h5>Boxes / barcodes</h5>
+      {% if order.boxes %}
+      <table class="table table-sm">
+        <thead><tr><th>Barcode</th><th>Kind</th><th>Scanned</th></tr></thead>
+        <tbody>
+        {% for b in order.boxes %}
+          <tr><td>{{ b.barcode }}</td><td>{{ b.kind }}</td>
+            <td>{% if b.scanned %}<span class="text-success">✓ {{ b.scanned_at.strftime('%H:%M') }}</span>{% else %}<span class="text-muted">pending</span>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="text-muted">No boxes recorded.</p>{% endif %}
+    </div>
 
-    <h2 style="margin-top:1.2rem">Surcharges</h2>
-    <form method="post" action="{{ url_for('order_apply_surcharges', oid=o.id) }}">
-      {% set applied = o.surcharges|map(attribute='id')|list %}
-      {% for s in all_surcharges %}
-      <label class="small" style="display:block"><input type="checkbox" name="surcharge_ids" value="{{ s.id }}" {{ 'checked' if s.id in applied }} style="width:auto"> {{ s.name }}</label>
-      {% endfor %}
-      <button class="btn ghost block sm" style="margin-top:.5rem">Update surcharges</button>
-    </form>
+    <div class="card p-3">
+      <h5>Event history</h5>
+      <ul class="list-group list-group-flush">
+        {% for e in order.events %}
+        <li class="list-group-item d-flex justify-content-between">
+          <span>{{ e.status }} — {{ e.note or '' }}</span>
+          <span class="text-muted small">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
   </div>
-</div>
 
-<div class="card">
-  <h2>Boxes ({{ o.items|length }})</h2>
-  <table>
-    <thead><tr><th>Barcode</th><th>Type</th><th>Status</th></tr></thead>
-    <tbody>
-    {% for i in o.items %}
-    <tr><td class="mono">{{ i.barcode }}</td><td>{{ i.kind }}</td>
-    <td><span class="pill {{ 'delivered' if i.status in ['delivered','collected','loaded'] else ('failed' if i.status=='missing' else 'pending') }}">{{ i.status }}</span></td></tr>
-    {% else %}<tr><td colspan="3" class="muted">No boxes recorded.</td></tr>{% endfor %}
-    </tbody>
-  </table>
-  {% if o.pod %}
-  <h2 style="margin-top:1rem">Proof</h2>
-  <div class="actions">
-    {% if o.pod.photo %}<img class="podimg" src="{{ url_for('pod_photo', pid=o.pod.id) }}">{% endif %}
-    {% if o.pod.signature %}<img class="podimg" src="{{ url_for('pod_signature', pid=o.pod.id) }}">{% endif %}
+  <div class="col-md-5">
+    <div class="card p-3 mb-3">
+      <h5>Assign</h5>
+      <form method="post" action="{{ url_for('order_assign', order_id=order.id) }}">
+        <div class="mb-2"><label class="form-label">Driver</label>
+          <select name="driver_id" class="form-select">
+            <option value="">Unassigned</option>
+            {% for d in drivers %}<option value="{{ d.id }}" {% if order.driver_id==d.id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="mb-2"><label class="form-label">Vehicle</label>
+          <select name="vehicle_id" class="form-select">
+            <option value="">None</option>
+            {% for v in vehicles %}<option value="{{ v.id }}" {% if order.vehicle_id==v.id %}selected{% endif %}>{{ v.registration }}</option>{% endfor %}
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" type="submit">Save assignment</button>
+      </form>
+      <p class="text-muted small mt-2">Tip: use the Route Planner or Pending Work Board for full driver/vehicle allocation with capacity checks.</p>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <h5>Update status</h5>
+      <form method="post" action="{{ url_for('order_set_status', order_id=order.id) }}">
+        <select name="status" class="form-select mb-2">
+          {% for s in statuses %}<option value="{{ s }}" {% if s==order.status %}selected{% endif %}>{{ status_labels[s] }}</option>{% endfor %}
+        </select>
+        <input class="form-control mb-2" name="note" placeholder="Note (optional)">
+        <button class="btn btn-outline-primary btn-sm" type="submit">Update</button>
+      </form>
+    </div>
+
+    {% if order.pod %}
+    <div class="card p-3 mb-3">
+      <h5>Proof of Delivery</h5>
+      <p><b>Recipient:</b> {{ order.pod.recipient_name or '—' }}</p>
+      <p><b>Signature:</b> {{ order.pod.signature_data_url or '—' }}</p>
+      {% if order.pod.photo_data_url %}<img src="{{ order.pod.photo_data_url }}" class="img-fluid rounded mb-2">{% endif %}
+      <p><b>Boxes confirmed:</b> {{ order.pod.boxes_confirmed }} / {{ order.pod.boxes_confirmed + order.pod.boxes_missing }}</p>
+      {% if order.pod.exception_reason %}<p class="text-danger"><b>Exception:</b> {{ order.pod.exception_reason }}</p>{% endif %}
+      <p class="text-muted small">{{ order.pod.delivered_at.strftime('%Y-%m-%d %H:%M') }}</p>
+      <a class="small" href="{{ url_for('pod_public', reference=order.reference) }}" target="_blank">Public POD link (for invoices)</a>
+    </div>
+    {% endif %}
+
+    <div class="card p-3">
+      <h5>Add surcharge</h5>
+      <form method="post" action="{{ url_for('order_add_surcharge', order_id=order.id) }}">
+        <select name="surcharge_id" class="form-select mb-2">
+          {% for s in surcharges %}<option value="{{ s.id }}">{{ s.name }} (£{{ s.default_amount }}{{ '%' if s.is_percent else '' }})</option>{% endfor %}
+        </select>
+        <button class="btn btn-outline-secondary btn-sm" type="submit">Add</button>
+      </form>
+      {% if order.surcharges %}
+      <ul class="list-group list-group-flush mt-2">
+        {% for s in order.surcharges %}<li class="list-group-item d-flex justify-content-between px-0">
+          <span>{{ s.surcharge.name }}</span><span>£{{ '%.2f'|format(s.amount) }}</span></li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
   </div>
-  {% endif %}
 </div>
 {% endblock %}

@@ -1,36 +1,29 @@
-{% extends "base.html" %}
-{% block title %}My routes{% endblock %}
-{% block body %}
-<div class="phone">
-  {% if allocated %}
-  <h1>Allocated to me</h1>
-  <div class="card">
-  {% for o in allocated %}
-    <div class="stopline">
-      <div class="stopmeta"><b>{{ o.recipient or o.customer.name }}</b>
-        <span class="small muted">{{ o.job_type|capitalize }} · {{ o.delivery_postcode or o.postcode }} · {{ o.ref }}
-        {% if o.collection_date %}· {{ o.collection_date.strftime('%d %b') }} {{ o.collection_time or '' }}{% endif %}</span></div>
-      <span class="pill {{ o.status }}">{{ o.status }}</span>
-    </div>
-  {% endfor %}
+{% extends "base.html" %}{% block title %}My Route{% endblock %}
+{% block content %}
+<h3>Hi {{ driver.name }}</h3>
+<p class="text-muted">Completed today: {{ completed_today }} &middot; Van: {{ driver.vehicle.registration if driver.vehicle else '—' }}</p>
+
+{% if next_stop %}
+<div class="card p-3 mb-3 border-primary">
+  <h5>Next stop</h5>
+  <p class="mb-1"><b>{{ next_stop.reference }}</b> — {{ next_stop.customer.name }}</p>
+  <p class="mb-1">{{ next_stop.delivery_address if next_stop.job_type=='delivery' else next_stop.collection_address }}, {{ next_stop.delivery_postcode if next_stop.job_type=='delivery' else next_stop.collection_postcode }}</p>
+  <a class="btn btn-primary big-btn" href="{{ url_for('driver_stop', order_id=next_stop.id) }}">Open stop</a>
+</div>
+{% endif %}
+
+<h5>Today's stops ({{ stops|length }})</h5>
+<div class="list-group">
+{% for o in stops %}
+<a class="list-group-item list-group-item-action" href="{{ url_for('driver_stop', order_id=o.id) }}">
+  <div class="d-flex justify-content-between">
+    <span><b>{{ loop.index }}. {{ o.reference }}</b> — {{ o.customer.name }}</span>
+    <span class="badge bg-secondary">{{ o.job_type }}</span>
   </div>
-  {% endif %}
-  <h1>My routes</h1>
-  {% if routes %}
-    {% for r in routes %}
-    {% set done = r.stops|selectattr('status','in',['delivered','failed'])|list|length %}
-    <a class="drivercard" href="{{ url_for('driver_route', rid=r.id) }}">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <b>{{ r.name }}</b><span class="pill {{ r.status }}">{{ r.status }}</span>
-      </div>
-      <div class="muted small" style="margin-top:.3rem">
-        {{ r.run_date.strftime('%a %d %b') }} · {{ r.vehicle.reg if r.vehicle else 'no vehicle' }}
-        · {{ done }}/{{ r.stops|length }} done
-      </div>
-    </a>
-    {% endfor %}
-  {% else %}
-    <div class="card"><p class="muted">No routes assigned to you yet. Check back once dispatch has planned your round.</p></div>
-  {% endif %}
+  <div class="text-muted small">{{ o.delivery_postcode if o.job_type=='delivery' else o.collection_postcode }} &middot; {{ o.pallets }} pallets / {{ o.parcels }} parcels</div>
+</a>
+{% else %}
+<p class="text-muted">No stops allocated right now.</p>
+{% endfor %}
 </div>
 {% endblock %}

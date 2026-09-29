@@ -1,11 +1,9 @@
 {
-  "name": "Voya — Delivery Operations",
-  "short_name": "Voya",
-  "start_url": "/",
+  "name": "Hoya Driver",
+  "short_name": "Hoya",
+  "start_url": "/driver",
   "display": "standalone",
-  "background_color": "#1b2430",
-  "theme_color": "#1b2430",
-  "icons": [
-    {"src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
-  ]
+  "background_color": "#0b3168",
+  "theme_color": "#1450a3",
+  "icons": []
 }

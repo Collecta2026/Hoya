@@ -1,85 +1,93 @@
-<!doctype html>
-<html lang="en-GB">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>{% block title %}Voya{% endblock %} · Voya</title>
-<link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#1b2430">
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>{% block title %}Hoya{% endblock %} — Hoya Dispatch</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/hoya.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#1450a3">
 </head>
 <body>
-{% if user and not hide_nav %}
-<div class="topbar">
-  <a class="brand" href="/"><span class="dot"></span>Vo<span>ya</span></a>
-  {% if user.role in ['admin','dispatcher'] %}
-  <nav class="nav">
-    <div class="navgroup">
-      <a href="{{ url_for('dashboard') }}" class="navtop {{ 'active' if request.endpoint in ['dashboard','pending_board','orders','order_detail','order_new','routes_list','route_plan','route_detail','resources','scan_module'] }}">Operations &#9662;</a>
-      <div class="submenu">
-        <a href="{{ url_for('dashboard') }}">Control board</a>
-        <a href="{{ url_for('pending_board') }}">Pending work board</a>
-        <a href="{{ url_for('orders') }}">Orders</a>
-        <a href="{{ url_for('order_new') }}">New job</a>
-        <a href="{{ url_for('routes_list') }}">Routes</a>
-        <a href="{{ url_for('route_plan') }}">Plan a route</a>
-        <a href="{{ url_for('resources') }}">Resources (vans &amp; drivers)</a>
-        <a href="{{ url_for('scan_module') }}">Scanner</a>
-      </div>
+{% if current_user.is_authenticated %}
+<nav class="navbar navbar-expand-lg navbar-dark hoya-nav">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{{ url_for('index') }}">🚚 Hoya</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="nav">
+      <ul class="navbar-nav me-auto">
+        {% if current_user.role in ['admin', 'dispatcher'] %}
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">Operations</a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for('orders_board') }}">Dispatch Board</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('order_new') }}">New Order</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('routes_list') }}">Route Planner</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('pending_board') }}">Pending Work Board</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('scan_standalone') }}">Scanner</a></li>
+          </ul>
+        </li>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">Customers</a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for('customers_list') }}">Customer List</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('rate_settings') }}">Rate Settings</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('rate_regions') }}">Regions &amp; Zones</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('rate_calculator') }}">Rate Calculator</a></li>
+          </ul>
+        </li>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">Billing</a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for('invoices_list') }}">Invoices</a></li>
+          </ul>
+        </li>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">Fleet</a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for('fleet') }}">Drivers &amp; Vehicles</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('resources') }}">Resources</a></li>
+          </ul>
+        </li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('kpi_dashboard') }}">Insights</a></li>
+        {% endif %}
+        {% if current_user.role == 'driver' %}
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('driver_home') }}">My Route</a></li>
+        {% endif %}
+        {% if current_user.role == 'customer' %}
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('portal_home') }}">My Shipments</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('portal_order_new') }}">New Order</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('portal_invoices') }}">Invoices</a></li>
+        {% endif %}
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('help_page') }}"><i class="bi bi-question-circle"></i> Help</a></li>
+      </ul>
+      <span class="navbar-text text-white-50 me-3">{{ current_user.name }} · {{ current_user.role|capitalize }}</span>
+      <a class="btn btn-outline-light btn-sm" href="{{ url_for('logout') }}">Log out</a>
     </div>
-    <div class="navgroup">
-      <a href="{{ url_for('customers') }}" class="navtop {{ 'active' if 'customer' in (request.endpoint or '') or request.endpoint in ['surcharges','rate_settings','rate_regions','rate_calculator'] }}">Customers &#9662;</a>
-      <div class="submenu">
-        <a href="{{ url_for('customers') }}">Customers</a>
-        <a href="{{ url_for('customer_edit') }}">New customer</a>
-        <a href="{{ url_for('rate_template') }}">Rate-card template (CSV)</a>
-        <a href="{{ url_for('rate_settings') }}">Standard rate card</a>
-        <a href="{{ url_for('rate_regions') }}">Regions &amp; zones</a>
-        <a href="{{ url_for('rate_calculator') }}">Rate calculator</a>
-        <a href="{{ url_for('surcharges') }}">Surcharges &amp; fuel</a>
-      </div>
-    </div>
-    <div class="navgroup">
-      <a href="{{ url_for('invoices') }}" class="navtop {{ 'active' if 'invoice' in (request.endpoint or '') }}">Billing &#9662;</a>
-      <div class="submenu">
-        <a href="{{ url_for('invoices') }}">Invoices</a>
-        <a href="{{ url_for('invoice_run') }}">Weekly invoice run</a>
-        <a href="{{ url_for('surcharges') }}">Surcharges &amp; fuel</a>
-      </div>
-    </div>
-    <div class="navgroup">
-      <a href="{{ url_for('fleet') }}" class="navtop {{ 'active' if request.endpoint=='fleet' }}">Fleet &#9662;</a>
-      <div class="submenu">
-        <a href="{{ url_for('fleet') }}">Drivers &amp; vehicles</a>
-      </div>
-    </div>
-    <div class="navgroup">
-      <a href="{{ url_for('reports') }}" class="navtop {{ 'active' if request.endpoint in ['reports','messages'] }}">Insights &#9662;</a>
-      <div class="submenu">
-        <a href="{{ url_for('reports') }}">Reports &amp; KPIs</a>
-        <a href="{{ url_for('messages') }}">Customer messages</a>
-      </div>
-    </div>
-  </nav>
-  {% else %}
-  <nav class="nav">
-    <a href="{{ url_for('driver_home') }}" class="navtop {{ 'active' if request.endpoint=='driver_home' }}">My routes</a>
-    <a href="{{ url_for('scan_module') }}" class="navtop {{ 'active' if request.endpoint=='scan_module' }}">Scanner</a>
-  </nav>
-  {% endif %}
-  <div class="who">{{ user.name }} &middot; {{ user.role }} &middot; <a href="{{ url_for('logout') }}">Sign out</a></div>
-</div>
+  </div>
+</nav>
 {% endif %}
 
-<div class="wrap {{ wrap_class or '' }}">
-  {% with msgs = get_flashed_messages(with_categories=true) %}
-    {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+<main class="container-fluid py-3">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
   {% endwith %}
-  {% block body %}{% endblock %}
-</div>
-<script>
-if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
-</script>
+  {% block content %}{% endblock %}
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

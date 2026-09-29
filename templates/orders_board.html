@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Dispatch Board{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>Dispatch Board</h3>
+  <a class="btn btn-primary" href="{{ url_for('order_new') }}"><i class="bi bi-plus-circle"></i> New Order</a>
+</div>
+<div class="row g-2">
+  {% for status in board_statuses %}
+  <div class="col">
+    <div class="board-col">
+      <h6>{{ status_labels[status] }} ({{ columns[status]|length }})</h6>
+      {% for o in columns[status] %}
+      <div class="order-card">
+        <div class="ref">{{ o.reference }}</div>
+        <div>{{ o.customer.name }}</div>
+        <div class="text-muted">{{ o.delivery_postcode }} &middot; {{ o.job_type }}</div>
+        <div class="text-muted">{{ o.driver.name if o.driver else 'Unassigned' }}</div>
+        <a class="small" href="{{ url_for('order_detail', order_id=o.id) }}">Open</a>
+      </div>
+      {% else %}
+      <div class="text-muted small">No orders.</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

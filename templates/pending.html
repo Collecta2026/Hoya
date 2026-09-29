@@ -1,0 +1,70 @@
+{% extends "base.html" %}{% block title %}Pending Work Board{% endblock %}
+{% block content %}
+<h3 class="mb-3">Pending Work Control Board</h3>
+<div class="row g-2 mb-3">
+  <div class="col-md-3"><div class="stat-card bg-blue"><p>Deliveries active</p><h3>{{ summary.deliveries }}</h3></div></div>
+  <div class="col-md-3"><div class="stat-card bg-teal"><p>Collections active</p><h3>{{ summary.collections }}</h3></div></div>
+  <div class="col-md-3"><div class="stat-card bg-orange"><p>Pallets</p><h3>{{ summary.pallets }}</h3></div></div>
+  <div class="col-md-3"><div class="stat-card bg-red"><p>Parcels</p><h3>{{ summary.parcels }}</h3></div></div>
+</div>
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item"><a class="nav-link {{ 'active' if view=='status' }}" href="{{ url_for('pending_board', view='status') }}">By Status</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if view=='driver' }}" href="{{ url_for('pending_board', view='driver') }}">By Driver / Van</a></li>
+</ul>
+
+{% macro row(o) %}
+<tr class="{{ 'sla-amber' if tags[o.id]=='amber' else 'sla-red' if tags[o.id]=='red' else '' }}">
+  <td><a href="{{ url_for('order_detail', order_id=o.id) }}">{{ o.reference }}</a></td>
+  <td>{{ o.customer.name }}</td>
+  <td>{{ o.pallets }}p / {{ o.parcels }}pc</td>
+  <td>{{ o.collection_postcode }} → {{ o.delivery_postcode }}</td>
+  <td>{{ o.collection_date or '—' }} {{ o.collection_time or '' }}</td>
+  <td>{{ o.delivery_date or '—' }} ({{ o.timing }})</td>
+  <td>
+    <form method="post" action="{{ url_for('pending_allocate', order_id=o.id) }}" class="d-flex gap-1">
+      <select name="driver_id" class="form-select form-select-sm">
+        <option value="">Driver…</option>
+        {% for d in drivers %}<option value="{{ d.id }}" {% if o.driver_id==d.id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+      </select>
+      <select name="vehicle_id" class="form-select form-select-sm">
+        <option value="">Van…</option>
+        {% for v in vehicles %}<option value="{{ v.id }}" {% if o.vehicle_id==v.id %}selected{% endif %}>{{ v.registration }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-sm btn-primary">Set</button>
+    </form>
+  </td>
+  <td>
+    <form method="post" action="{{ url_for('pending_suggest', order_id=o.id) }}">
+      <button class="btn btn-sm btn-outline-secondary">Suggest</button>
+    </form>
+  </td>
+</tr>
+{% endmacro %}
+
+{% if view == 'status' %}
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h5>Awaiting Collection</h5>
+      <table class="table table-sm"><thead><tr><th>Ref</th><th>Customer</th><th>Goods</th><th>Route</th><th>Collect</th><th>Deliver</th><th>Allocate</th><th></th></tr></thead>
+      <tbody>{% for o in awaiting_collection %}{{ row(o) }}{% else %}<tr><td colspan="8" class="text-muted">None.</td></tr>{% endfor %}</tbody></table>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h5>Awaiting Delivery</h5>
+      <table class="table table-sm"><thead><tr><th>Ref</th><th>Customer</th><th>Goods</th><th>Route</th><th>Collect</th><th>Deliver</th><th>Allocate</th><th></th></tr></thead>
+      <tbody>{% for o in awaiting_delivery %}{{ row(o) }}{% else %}<tr><td colspan="8" class="text-muted">None.</td></tr>{% endfor %}</tbody></table>
+    </div>
+  </div>
+</div>
+{% else %}
+{% for driver_name, jobs in by_driver.items() %}
+<div class="card p-3 mb-2">
+  <h5>{{ driver_name }} ({{ jobs|length }} job(s))</h5>
+  <table class="table table-sm"><thead><tr><th>Ref</th><th>Customer</th><th>Goods</th><th>Route</th><th>Collect</th><th>Deliver</th><th>Allocate</th><th></th></tr></thead>
+  <tbody>{% for o in jobs %}{{ row(o) }}{% endfor %}</tbody></table>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

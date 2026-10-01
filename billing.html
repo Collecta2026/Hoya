@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}Billing{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Billing</h1><div class="sub">Click a status to move it Quoted → Invoiced → Paid.</div></div>
+  <div class="seg">
+    {% for f in ['all','quoted','invoiced','paid'] %}
+    <a href="{{ url_for('billing', filter=f) }}" class="{{ 'on' if flt==f }}">{{ f|capitalize }}</a>{% endfor %}
+  </div>
+</div>
+<div class="tiles">
+  <div class="tile"><div class="t">Bookings</div><div class="n">{{ totals.count }}</div></div>
+  <div class="tile accent"><div class="t">Billed (inc VAT)</div><div class="n">£{{ '{:,.0f}'.format(totals.total) }}</div></div>
+  <div class="tile"><div class="t">Outstanding</div><div class="n">£{{ '{:,.0f}'.format(totals.outstanding) }}</div></div>
+  <div class="tile"><div class="t">Paid</div><div class="n">£{{ '{:,.0f}'.format(totals.paid) }}</div></div>
+</div>
+<div class="card" style="padding:6px 6px 2px;overflow-x:auto"><table>
+  <thead><tr><th>Date</th><th>Customer</th><th>Goods</th><th>Basis</th><th class="rt">Net</th><th class="rt">VAT</th><th class="rt">Total</th><th class="rt">Status</th></tr></thead>
+  <tbody>
+  {% for o in orders %}
+  <tr>
+    <td class="tnum">{{ o.delivery_date.strftime('%d %b') if o.delivery_date else '—' }}</td>
+    <td style="font-weight:600"><a href="{{ url_for('order_detail', order_id=o.id) }}" style="text-decoration:none">{{ o.customer.name }}</a></td>
+    <td>{{ o.goods_category or '—' }}<div class="muted" style="font-size:11px">{{ o.quantity_summary or '' }}</div></td>
+    <td><span class="muted" style="font-size:12px">{{ o.price_basis or '—' }}</span></td>
+    <td class="rt money">£{{ '%.2f'|format(o.price_net or 0) }}</td>
+    <td class="rt">£{{ '%.2f'|format(o.price_vat or 0) }}</td>
+    <td class="rt money">£{{ '%.2f'|format(o.price_total or 0) }}</td>
+    <td class="rt"><form method="post" action="{{ url_for('billing_cycle', order_id=o.id, filter=flt) }}" style="display:inline">
+      <button class="statusbadge st-{{ o.bill_status }}" type="submit">{{ o.bill_status|capitalize }}</button></form></td>
+  </tr>
+  {% else %}<tr><td colspan="8" class="muted" style="text-align:center;padding:18px">No bookings in this view.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+<div class="hint" style="margin-top:10px">Pallet prices use the Heliolink rate card (postcode → band → tier). Wavelength uses the distance engine. FSC 16%, VAT 20%.</div>
+{% endblock %}

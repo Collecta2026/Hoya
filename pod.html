@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>POD {{ order.reference }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/heliolink.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+</head><body style="background:#f0f0f0">
+<div class="no-print" style="padding:12px 18px;background:#fff;border-bottom:1px solid #ccc;display:flex;justify-content:space-between;align-items:center">
+  <b>POD — {{ order.reference }}</b>
+  <div><button class="btn btn-sm btn-primary" onclick="window.print()">🖨 Print</button>
+    <a class="btn btn-sm" href="{{ url_for('order_detail', order_id=order.id) }}">Close</a></div>
+</div>
+<div style="padding:18px">
+{% for copy in copies %}
+{% set isCol = copy == 'collection' %}
+<div class="podpage">
+  <div class="pod-head">
+    <img class="pod-logo" src="{{ url_for('static', filename='img/logo-black.png') }}" alt="Heliolink">
+    <div class="pod-title"><div class="t">{{ 'COLLECTION NOTE' if isCol else 'PROOF OF DELIVERY' }}</div>
+      <span class="copy">{{ 'Collection Copy' if isCol else 'Delivery Copy' }}</span></div>
+    <div class="pod-bc"><svg class="barcode" jsbarcode-value="{{ order.reference }}" jsbarcode-height="46" jsbarcode-width="1.4" jsbarcode-fontsize="12" jsbarcode-margin="0"></svg></div>
+  </div>
+  <div class="pod-refs">
+    <div><b>Consignment No:</b> {{ order.reference }}</div><div><b>Customer Ref:</b> __________</div>
+    <div><b>Date:</b> {{ order.delivery_date.strftime('%d %b %Y') if order.delivery_date else '' }} {{ order.delivery_time or '' }}</div>
+    <div><b>Total Pallets:</b> {{ order.full_pallets + order.half_pallets or '____' }}</div>
+  </div>
+  <div class="pod-party">
+    <div><h5>Consignor</h5>
+      <div class="ln"><b>Company:</b> {{ order.customer.name }}</div>
+      <div class="ln"><b>Address:</b> {{ order.customer.address or '' }}</div>
+      <div class="ln"><b>Postcode:</b> {{ order.customer.postcode or '' }}</div>
+      <div class="ln"><b>Phone:</b> {{ order.customer.phone or '' }}</div><div class="ln"><b>Contact:</b> </div></div>
+    <div><h5>Consignee</h5>
+      <div class="ln"><b>Company:</b> </div>
+      <div class="ln"><b>Address:</b> {{ order.delivery_address or '' }}</div>
+      <div class="ln"><b>Postcode:</b> {{ order.delivery_postcode if order.delivery_postcode != 'MULTIPLE' else '' }}</div>
+      <div class="ln"><b>Phone:</b> </div><div class="ln"><b>Contact:</b> </div></div>
+  </div>
+  <table class="pod-goods"><thead><tr><th style="width:62%">Description of Goods</th><th>Qty</th><th>Weight (kg)</th></tr></thead>
+    <tbody><tr><td>{{ order.goods_category or '' }}{% if order.goods_description %} — {{ order.goods_description }}{% endif %}</td><td>{{ order.quantity_summary or '' }}</td><td></td></tr>
+    <tr><td>&nbsp;</td><td></td><td></td></tr></tbody></table>
+  <div class="pod-si"><div class="lab">Special Instructions</div>{{ order.notes or '' }}</div>
+  <div class="pod-sign">
+    <div class="cap">{{ 'Consignor Signature' if isCol else 'Consignee Signature' }}</div>
+    <div class="stmt">I am signing to confirm that the goods described above have been {{ 'collected' if isCol else 'received' }} in good condition, for carriage under RHA (2009) conditions of carriage.</div>
+    <div class="rowline">
+      <div class="box"><div class="capl">Signature</div><div class="line">Sign above</div></div>
+      <div class="box"><div class="capl">Printed Name</div><div class="line">&nbsp;</div></div>
+      <div class="box" style="max-width:150px"><div class="capl">Date</div><div class="line">&nbsp;</div></div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+</div>
+<script>if(window.JsBarcode){try{JsBarcode(".barcode").init();}catch(e){}}</script>
+</body></html>

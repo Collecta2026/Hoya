@@ -1,72 +1,50 @@
 {% extends "base.html" %}{% block title %}Fleet{% endblock %}
+{% macro dform(d) %}
+<form method="post" action="{{ url_for('driver_save') }}">
+  {% if d %}<input type="hidden" name="id" value="{{ d.id }}">{% endif %}
+  <div class="field"><label class="f">Name</label><input name="name" value="{{ d.name if d else '' }}" required></div>
+  <div class="row"><div class="field"><label class="f">Phone</label><input name="phone" value="{{ d.phone if d else '' }}"></div>
+    <div class="field"><label class="f">PIN</label><input name="pin" value="{{ d.pin if d else '' }}" placeholder="4 digits"></div></div>
+  <div class="row"><div class="field"><label class="f">Vehicle</label><select name="vehicle_id"><option value="">None</option>
+    {% for v in vehicles %}<option value="{{ v.id }}" {{ 'selected' if d and d.vehicle_id==v.id }}>{{ v.reg }} · {{ v.size }}</option>{% endfor %}</select></div>
+    <div class="field"><label class="f">Status</label><select name="status">{% for s in ['available','on_route','off'] %}<option {{ 'selected' if d and d.status==s }}>{{ s }}</option>{% endfor %}</select></div></div>
+  <button class="btn btn-primary" type="submit">{{ 'Save' if d else 'Add driver' }}</button>
+</form>
+{% endmacro %}
+{% macro vform(v) %}
+<form method="post" action="{{ url_for('vehicle_save') }}">
+  {% if v %}<input type="hidden" name="id" value="{{ v.id }}">{% endif %}
+  <div class="field"><label class="f">Registration</label><input name="reg" value="{{ v.reg if v else '' }}" required style="text-transform:uppercase"></div>
+  <div class="row"><div class="field"><label class="f">Size / type</label><input name="size" value="{{ v.size if v else '' }}" placeholder="e.g. 3.5t Luton"></div>
+    <div class="field"><label class="f">Capacity (pallets)</label><input type="number" name="capacity_pallets" value="{{ v.capacity_pallets if v else 4 }}"></div></div>
+  <div class="field"><label class="f">Status</label><select name="status">{% for s in ['available','on_route','off_road'] %}<option {{ 'selected' if v and v.status==s }}>{{ s }}</option>{% endfor %}</select></div>
+  <button class="btn btn-primary" type="submit">{{ 'Save' if v else 'Add vehicle' }}</button>
+</form>
+{% endmacro %}
 {% block content %}
-<h3 class="mb-3">Fleet — Drivers &amp; Vehicles</h3>
-<div class="row g-3">
-  <div class="col-md-6">
-    <div class="card p-3">
-      <h5>Drivers</h5>
-      <table class="table table-sm">
-        <thead><tr><th>Name</th><th>Phone</th><th>PIN</th><th>Van</th><th>Status</th></tr></thead>
-        <tbody>
-        {% for d in drivers %}
-        <tr>
-          <td>{{ d.name }}</td><td>{{ d.phone }}</td><td>{{ d.pin }}</td>
-          <td>{{ d.vehicle.registration if d.vehicle else '—' }}</td>
-          <td>
-            <form method="post" action="{{ url_for('driver_set_status', driver_id=d.id) }}" class="d-inline">
-              <select name="status" class="form-select form-select-sm d-inline w-auto" onchange="this.form.submit()">
-                <option value="available" {% if d.status=='available' %}selected{% endif %}>Available</option>
-                <option value="on_route" {% if d.status=='on_route' %}selected{% endif %}>On Route</option>
-                <option value="off" {% if d.status=='off' %}selected{% endif %}>Off</option>
-              </select>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      <form method="post" action="{{ url_for('driver_new') }}" class="row g-2 mt-2">
-        <div class="col-4"><input class="form-control form-control-sm" name="name" placeholder="Name" required></div>
-        <div class="col-3"><input class="form-control form-control-sm" name="phone" placeholder="Phone"></div>
-        <div class="col-2"><input class="form-control form-control-sm" name="pin" placeholder="PIN"></div>
-        <div class="col-3"><button class="btn btn-sm btn-primary w-100" type="submit">Add driver</button></div>
-      </form>
-    </div>
+<div class="page-head"><div><h1>Fleet</h1><div class="sub">Add, edit or remove drivers and vehicles.</div></div></div>
+<div class="grid2">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center"><div class="eyebrow" style="margin:0">Drivers</div></div>
+    <details class="edit" style="margin:4px 0 10px"><summary>＋ Add driver</summary><div>{{ dform(none) }}</div></details>
+    <table><thead><tr><th>Name</th><th>Phone</th><th>Van</th><th>Status</th><th class="rt"></th></tr></thead><tbody>
+    {% for d in drivers %}
+    <tr><td style="font-weight:600">{{ d.name }}</td><td>{{ d.phone or '' }}</td><td>{{ d.vehicle.reg if d.vehicle else '—' }}</td><td>{{ d.status }}</td>
+      <td class="rt"><details class="edit" style="display:inline-block;text-align:left"><summary>✎</summary><div style="width:min(420px,80vw)">{{ dform(d) }}</div></details>
+        <form method="post" action="{{ url_for('driver_delete', did=d.id) }}" style="display:inline" onsubmit="return confirm('Remove {{ d.name }}?')"><button class="iconbtn" type="submit">🗑</button></form></td></tr>
+    {% endfor %}
+    </tbody></table>
   </div>
-  <div class="col-md-6">
-    <div class="card p-3">
-      <h5>Vehicles</h5>
-      <table class="table table-sm">
-        <thead><tr><th>Reg</th><th>Size</th><th>Capacity</th><th>Status</th></tr></thead>
-        <tbody>
-        {% for v in vehicles %}
-        <tr>
-          <td>{{ v.registration }}</td><td>{{ v.size }}</td><td>{{ v.capacity_pallets }} pallets</td>
-          <td>
-            <form method="post" action="{{ url_for('vehicle_set_status', vehicle_id=v.id) }}" class="d-inline">
-              <select name="status" class="form-select form-select-sm d-inline w-auto" onchange="this.form.submit()">
-                <option value="available" {% if v.status=='available' %}selected{% endif %}>Available</option>
-                <option value="on_route" {% if v.status=='on_route' %}selected{% endif %}>On Route</option>
-                <option value="off_road" {% if v.status=='off_road' %}selected{% endif %}>Off Road</option>
-              </select>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      <form method="post" action="{{ url_for('vehicle_new') }}" class="row g-2 mt-2">
-        <div class="col-5"><input class="form-control form-control-sm" name="registration" placeholder="Registration" required></div>
-        <div class="col-4">
-          <select class="form-select form-select-sm" name="size">
-            <option value="panel_van">Panel Van</option>
-            <option value="2.5t">2.5t</option>
-            <option value="7.5t">7.5t</option>
-          </select>
-        </div>
-        <div class="col-3"><button class="btn btn-sm btn-primary w-100" type="submit">Add vehicle</button></div>
-      </form>
-    </div>
+  <div class="card">
+    <div class="eyebrow">Vehicles</div>
+    <details class="edit" style="margin:4px 0 10px"><summary>＋ Add vehicle</summary><div>{{ vform(none) }}</div></details>
+    <table><thead><tr><th>Reg</th><th>Size</th><th>Capacity</th><th>Status</th><th class="rt"></th></tr></thead><tbody>
+    {% for v in vehicles %}
+    <tr><td style="font-weight:600">{{ v.reg }}</td><td>{{ v.size }}</td><td>{{ v.capacity_pallets }} plt</td><td>{{ v.status }}</td>
+      <td class="rt"><details class="edit" style="display:inline-block;text-align:left"><summary>✎</summary><div style="width:min(420px,80vw)">{{ vform(v) }}</div></details>
+        <form method="post" action="{{ url_for('vehicle_delete', vid=v.id) }}" style="display:inline" onsubmit="return confirm('Remove {{ v.reg }}?')"><button class="iconbtn" type="submit">🗑</button></form></td></tr>
+    {% endfor %}
+    </tbody></table>
   </div>
 </div>
 {% endblock %}

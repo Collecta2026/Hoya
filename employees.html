@@ -1,50 +1,31 @@
 {% extends "base.html" %}{% block title %}Employees{% endblock %}
+{% macro eform(e) %}
+<form method="post" action="{{ url_for('employee_save') }}">
+  {% if e %}<input type="hidden" name="id" value="{{ e.id }}">{% endif %}
+  <div class="field"><label class="f">Full name</label><input name="name" value="{{ e.name if e else '' }}" required></div>
+  <div class="field"><label class="f">Email</label><input type="email" name="email" value="{{ e.email if e else '' }}" required></div>
+  <div class="field"><label class="f">Password</label><input name="password" placeholder="{{ 'leave blank to keep' if e else 'set a password' }}"></div>
+  <div class="row"><div class="field"><label class="f">Access</label><select name="access">{% for a in ['admin','dispatcher','driver'] %}<option {{ 'selected' if e and e.access==a }}>{{ a }}</option>{% endfor %}</select></div>
+    <div class="field"><label class="f">Type</label><select name="emp_type">{% for t in ['Employee','Contractor'] %}<option {{ 'selected' if e and e.emp_type==t }}>{{ t }}</option>{% endfor %}</select></div></div>
+  <button class="btn btn-primary" type="submit">{{ 'Save' if e else 'Add employee' }}</button>
+</form>
+{% endmacro %}
 {% block content %}
-<h3 class="mb-3">Employees</h3>
-<div class="row g-3">
-  <div class="col-md-7">
-    <div class="card p-3">
-      <table class="table table-sm">
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-        {% for u in staff %}
-        <tr>
-          <td>{{ u.name }}</td><td>{{ u.email }}</td><td>{{ u.role }}</td>
-          <td>{% if u.active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}</td>
-          <td class="d-flex gap-1">
-            <form method="post" action="{{ url_for('employee_toggle', user_id=u.id) }}">
-              <button class="btn btn-sm btn-outline-secondary" type="submit" {% if u.id == current_user.id %}disabled{% endif %}>
-                {{ 'Deactivate' if u.active else 'Activate' }}
-              </button>
-            </form>
-            <form method="post" action="{{ url_for('employee_reset_password', user_id=u.id) }}" class="d-flex gap-1">
-              <input type="password" name="password" class="form-control form-control-sm" placeholder="New password" style="width:140px">
-              <button class="btn btn-sm btn-outline-primary" type="submit">Reset</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  <div class="col-md-5">
-    <div class="card p-3">
-      <h5>Add employee</h5>
-      <form method="post" action="{{ url_for('employee_new') }}">
-        <div class="mb-2"><label class="form-label">Name</label><input class="form-control" name="name" required></div>
-        <div class="mb-2"><label class="form-label">Email</label><input type="email" class="form-control" name="email" required></div>
-        <div class="mb-2"><label class="form-label">Password</label><input class="form-control" name="password" placeholder="Leave blank for a default"></div>
-        <div class="mb-2"><label class="form-label">Role</label>
-          <select class="form-select" name="role">
-            <option value="dispatcher">Dispatcher</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" type="submit">Add employee</button>
-      </form>
-      <p class="text-muted small mt-2">Dispatchers can run day-to-day operations (orders, routes, fleet, billing). Only Admins can manage employees and this list.</p>
-    </div>
-  </div>
-</div>
+<div class="page-head"><div><h1>Employees &amp; Contractors</h1><div class="sub">Who can sign in. Add people with an email and password, and set their access level.</div></div></div>
+<details class="card" style="margin-bottom:16px"><summary style="cursor:pointer;font-weight:600;color:var(--brand)">＋ Add employee / contractor</summary>
+  <div style="margin-top:12px">{{ eform(none) }}</div></details>
+<div class="card" style="padding:6px 6px 2px;overflow-x:auto"><table>
+  <thead><tr><th>Name</th><th>Email</th><th>Access</th><th>Type</th><th>Status</th><th class="rt">Actions</th></tr></thead><tbody>
+  {% for e in employees %}
+  <tr><td style="font-weight:600">{{ e.name }}</td><td class="muted">{{ e.email }}</td>
+    <td><span class="tag {{ 'blue' if e.access!='admin' }}">{{ e.access|capitalize }}</span></td><td>{{ e.emp_type }}</td>
+    <td>{% if e.active %}<span class="statusbadge st-delivered">Active</span>{% else %}<span class="statusbadge">Inactive</span>{% endif %}</td>
+    <td class="rt">
+      <details class="edit" style="display:inline-block;text-align:left"><summary>✎ Edit</summary><div style="width:min(420px,80vw)">{{ eform(e) }}</div></details>
+      <form method="post" action="{{ url_for('employee_toggle', eid=e.id) }}" style="display:inline"><button class="btn btn-sm" type="submit">{{ 'Deactivate' if e.active else 'Activate' }}</button></form>
+      <form method="post" action="{{ url_for('employee_delete', eid=e.id) }}" style="display:inline" onsubmit="return confirm('Remove {{ e.name }}?')"><button class="iconbtn" type="submit">🗑</button></form>
+    </td></tr>
+  {% endfor %}
+  </tbody></table></div>
+<div class="hint" style="margin-top:10px">Access — <b>Admin</b>: everything incl. employees. <b>Dispatcher</b>: bookings, schedule, routes, fleet, billing. <b>Driver</b>: their own run (future driver app).</div>
 {% endblock %}

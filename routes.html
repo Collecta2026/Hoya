@@ -1,46 +1,73 @@
 {% extends "base.html" %}{% block title %}Route Planner{% endblock %}
 {% block content %}
-<h3 class="mb-3">Route Planner</h3>
-<div class="row g-3">
-  <div class="col-md-6">
-    <div class="card p-3">
-      <h5>Build a route</h5>
-      <form method="post" action="{{ url_for('routes_build') }}">
-        <div class="mb-2"><label class="form-label">Driver</label>
-          <select class="form-select" name="driver_id" required>
-            {% for d in drivers %}<option value="{{ d.id }}">{{ d.name }} ({{ d.status }})</option>{% endfor %}
-          </select>
-        </div>
-        <label class="form-label">Unassigned orders (nearest-neighbour optimised on save)</label>
-        <div class="border rounded p-2" style="max-height:280px;overflow-y:auto">
-          {% for o in unassigned %}
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="order_ids" value="{{ o.id }}" id="o{{ o.id }}">
-            <label class="form-check-label" for="o{{ o.id }}">{{ o.reference }} — {{ o.customer.name }} — {{ o.delivery_postcode }}</label>
-          </div>
-          {% else %}<p class="text-muted">No unassigned orders.</p>{% endfor %}
-        </div>
-        <button class="btn btn-primary mt-3" type="submit">Build &amp; Optimise Route</button>
-      </form>
-    </div>
+{% set tw = {'delivery':'Delivery','collection':'Collection','both':'Col+Del','multidrop':'Multi-drop'} %}
+<div class="page-head"><div><h1>Route Planner</h1><div class="sub">Pick a driver and date to build their run; add postcodes to a multi-drop round.</div></div></div>
+
+<div class="card" style="margin-bottom:16px">
+  <form class="row" method="get" action="{{ url_for('routes') }}" style="align-items:flex-end">
+    <div class="field" style="max-width:260px;margin:0"><label class="f">Driver</label>
+      <select name="driver_id" onchange="this.form.submit()">
+        {% for d in drivers %}<option value="{{ d.id }}" {{ 'selected' if d.id==did }}>{{ d.name }}</option>{% endfor %}</select></div>
+    <div class="field" style="max-width:200px;margin:0"><label class="f">Date</label>
+      <input type="date" name="date" value="{{ run_date.isoformat() }}" onchange="this.form.submit()"></div>
+    {% if sel_md %}<input type="hidden" name="md" value="{{ sel_md }}">{% endif %}
+    <button class="btn btn-sm" type="button" onclick="window.print()">🖨 Print run sheet</button>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:16px no-print" >
+  <div class="eyebrow">Plan a multi-drop round</div>
+  {% if md_jobs %}
+  <form class="row" method="get" action="{{ url_for('routes') }}" style="align-items:flex-end;margin-bottom:10px">
+    <input type="hidden" name="driver_id" value="{{ did }}"><input type="hidden" name="date" value="{{ run_date.isoformat() }}">
+    <div class="field" style="max-width:340px;margin:0"><label class="f">Multi-drop round</label>
+      <select name="md" onchange="this.form.submit()">
+        {% for j in md_jobs %}<option value="{{ j.id }}" {{ 'selected' if j.id==sel_md }}>{{ j.customer.name }} · {{ j.delivery_address or 'round' }} · {{ j.reference }}</option>{% endfor %}</select></div>
+  </form>
+  {% if sel_md_job %}
+  <form class="row" method="post" action="{{ url_for('route_add_drop', order_id=sel_md_job.id) }}" style="align-items:flex-end">
+    <div class="field" style="max-width:150px;margin:0"><label class="f">Drop postcode</label><input name="postcode" placeholder="e.g. LA1 1AA" style="text-transform:uppercase" required></div>
+    <div class="field" style="max-width:220px;margin:0"><label class="f">Drop name (optional)</label><input name="name" placeholder="e.g. Booths, Lancaster"></div>
+    <button class="btn btn-sm btn-primary" type="submit">＋ Add drop</button>
+  </form>
+  <div style="margin-top:12px">
+    <div class="hint" style="margin-bottom:8px">{{ sel_md_job.customer.name }} · {{ sel_md_job.reference }} · {{ sel_md_job.drops|length }} drop(s)</div>
+    {% for dp in sel_md_job.drops %}
+    <div class="qrow"><span class="stopn" style="width:24px;height:24px;font-size:11px">{{ loop.index }}</span>
+      <span style="flex:1">{{ dp.postcode }}{% if dp.name %} · {{ dp.name }}{% endif %}</span>
+      <form method="post" action="{{ url_for('route_del_drop', drop_id=dp.id) }}"><button class="iconbtn" type="submit">✕</button></form></div>
+    {% else %}<div class="hint">No postcodes added yet.</div>{% endfor %}
   </div>
-  <div class="col-md-6">
-    <h5>Active routes by driver</h5>
-    {% for d in drivers %}
-    <div class="card p-3 mb-2">
-      <div class="d-flex justify-content-between">
-        <b>{{ d.name }}</b>
-        <form method="post" action="{{ url_for('routes_reoptimise', driver_id=d.id) }}">
-          <button class="btn btn-sm btn-outline-secondary" type="submit">Re-optimise</button>
-        </form>
-      </div>
-      <ol class="mb-0">
-        {% for o in active_by_driver[d.id] %}
-        <li>{{ o.reference }} — {{ o.delivery_postcode }} <span class="badge bg-secondary badge-status">{{ o.status }}</span></li>
-        {% else %}<li class="text-muted">No active stops.</li>{% endfor %}
-      </ol>
-    </div>
-    {% endfor %}
+  {% endif %}
+  {% else %}<div class="hint">No multi-drop rounds yet. Book one with job type “Multi-drop round”, assign a driver &amp; date, then add drop postcodes here.</div>{% endif %}
+</div>
+
+<div class="card">
+  {% set drv = drivers|selectattr('id','equalto',did)|first %}
+  <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+    <div><h3>{{ drv.name if drv else '' }} · {{ run_date.strftime('%d %b') }}</h3>
+      <div class="muted" style="font-size:12px">{{ drv.vehicle.reg + ' · ' + drv.vehicle.size if drv and drv.vehicle else 'No van assigned' }}</div></div>
+    <div class="muted" style="font-size:12px">Depot: Riversway, Preston PR2 2TE</div>
   </div>
+  {% if entries %}
+  <div class="stop" style="background:var(--brand-tint)"><div class="stopn" style="background:var(--brand-dark)">D</div><div class="d"><b>Depot — load &amp; depart</b><div class="muted" style="font-size:12px">Riversway Managed Workshops, Leeward Rd, Preston PR2 2TE</div></div></div>
+  <div class="runline"></div>
+  {% for e in entries %}
+  {% set j=e.job %}
+  <div class="stop"><div class="stopn">{{ loop.index }}</div><div class="d">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <b>{{ (e.drop.name or j.customer.name) if e.drop else j.customer.name }}</b>
+      <span class="tnum muted">{{ '' if e.drop else (j.delivery_time or '—') }}</span></div>
+    <div class="muted" style="font-size:12.5px">{{ e.drop.postcode if e.drop else ((j.delivery_address or '') + (' · ' + j.delivery_postcode if j.delivery_postcode and j.delivery_postcode!='MULTIPLE' else '')) }}</div>
+    <div style="font-size:12px;margin-top:3px"><span class="jgoods">{{ j.goods_category or '' }}</span>{% if e.drop %} · {{ j.customer.name }}{% else %} · {{ j.quantity_summary or '' }}{% endif %} · <b>{{ tw[j.job_type] }}</b></div>
+  </div></div>
+  {% if not loop.last %}<div class="runline"></div>{% endif %}
+  {% endfor %}
+  <div class="runline"></div>
+  <div class="stop" style="background:var(--surface-2)"><div class="stopn" style="background:var(--muted)">↩</div><div class="d"><b>Return to depot</b></div></div>
+  <div style="display:flex;gap:18px;margin-top:14px"><div><div class="muted" style="font-size:11px;text-transform:uppercase">Stops</div><div style="font-size:20px;font-weight:700">{{ entries|length }}</div></div></div>
+  {% else %}
+  <div class="muted" style="text-align:center;padding:20px">No stops for this driver on this day. Assign jobs when booking, or add postcodes to a multi-drop round above.</div>
+  {% endif %}
 </div>
 {% endblock %}

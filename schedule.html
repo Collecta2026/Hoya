@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block title %}Schedule{% endblock %}
+{% block content %}
+{% set dow = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+<div class="page-head">
+  <div><h1>Delivery Schedule</h1>
+    <div class="sub">Week of {{ week_start.strftime('%d %b') }} – {{ week_end.strftime('%d %b %Y') }}</div></div>
+  <div class="row">
+    <a class="btn btn-primary" href="{{ url_for('booking', date=today.isoformat()) }}">＋ New booking</a>
+    <div class="seg">
+      <a href="{{ url_for('schedule', week=prev_week) }}">‹</a>
+      <a href="{{ url_for('schedule', week=this_week) }}">This week</a>
+      <a href="{{ url_for('schedule', week=next_week) }}">›</a>
+    </div>
+  </div>
+</div>
+<div class="cal">
+  {% for d in days %}
+  <div class="day {{ 'today' if d == today }}">
+    <div class="dhead">
+      <div><span class="dow">{{ dow[loop.index0] }}</span> <span class="dnum">{{ d.strftime('%d %b') }}</span></div>
+      <a class="addbtn" href="{{ url_for('booking', date=d.isoformat()) }}" title="Book">＋</a>
+    </div>
+    <div class="dbody">
+      {% for o in by_day[d] %}
+      <a class="job s-{{ o.status }}" href="{{ url_for('order_detail', order_id=o.id) }}">
+        <div class="jtop"><span class="jtime tnum">{{ o.delivery_time or '—' }}</span>
+          <span class="chip">{{ STATUS_LABELS[o.status] }}</span></div>
+        <div class="jcust">{{ o.customer.name }}</div>
+        {% if o.goods_category %}<div class="jgoods">{{ o.goods_category }}</div>{% endif %}
+        {% if o.goods_description %}<div class="jdesc">{{ o.goods_description }}</div>{% endif %}
+        {% if o.quantity_summary %}<div class="jqty">▪ {{ o.quantity_summary }}</div>{% endif %}
+        {% if o.price_total %}<div class="jprice">£{{ '%.2f'|format(o.price_total) }} inc VAT</div>{% endif %}
+        <div class="jmeta">
+          {% if o.job_type != 'delivery' %}<span class="chip">{{ 'Multi-drop' if o.job_type=='multidrop' else ('Col + Del' if o.job_type=='both' else 'Collection') }}</span>{% endif %}
+          <span>👤 {{ o.driver.name if o.driver else 'Unassigned' }}</span>
+          {% if o.vehicle %}<span>🚚 {{ o.vehicle.reg }}</span>{% endif %}
+        </div>
+      </a>
+      {% else %}
+      <a class="empty" href="{{ url_for('booking', date=d.isoformat()) }}">No deliveries<b>＋ add</b></a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

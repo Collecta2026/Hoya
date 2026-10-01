@@ -1,22 +1,18 @@
-{% extends "base.html" %}{% block title %}Sign in{% endblock %}
-{% block content %}
-<div class="row justify-content-center mt-5">
-  <div class="col-md-4">
-    <div class="card p-4">
-      <h4 class="mb-3">Hoya — Staff Sign In</h4>
-      <form method="post">
-        <div class="mb-3"><label class="form-label">Email</label>
-          <input type="email" name="email" class="form-control" required autofocus></div>
-        <div class="mb-3"><label class="form-label">Password</label>
-          <input type="password" name="password" class="form-control" required></div>
-        <button class="btn btn-primary w-100" type="submit">Sign in</button>
-      </form>
-      <hr>
-      <div class="d-flex justify-content-between">
-        <a href="{{ url_for('driver_login') }}">Driver login</a>
-        <a href="{{ url_for('portal_login') }}">Customer portal</a>
-      </div>
-    </div>
-  </div>
-</div>
-{% endblock %}
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · Heliolink Delivery Ops</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/heliolink.css') }}">
+</head><body>
+<main class="wrap" style="max-width:380px;margin-top:8vh">
+  <div style="text-align:center;margin-bottom:18px"><img src="{{ url_for('static', filename='img/logo-orange.png') }}" alt="Heliolink" style="height:40px"></div>
+  {% with msgs = get_flashed_messages(with_categories=true) %}{% for cat,msg in msgs %}<div class="alert error">{{ msg }}</div>{% endfor %}{% endwith %}
+  <form class="card" method="post">
+    <div class="eyebrow">Delivery Ops · Sign in</div>
+    <div class="field"><label class="f">Email</label><input type="email" name="email" required autofocus></div>
+    <div class="field"><label class="f">Password</label><input type="password" name="password" required></div>
+    <button class="btn btn-primary" type="submit" style="width:100%;justify-content:center">Sign in</button>
+  </form>
+</main>
+</body></html>

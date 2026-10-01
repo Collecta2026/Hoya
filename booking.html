@@ -1,0 +1,213 @@
+{% extends "base.html" %}{% block title %}New Booking{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>New Booking</h1>
+  <div class="sub">Price is worked out automatically — tick custom to override. Confirming adds it to the schedule &amp; billing and emails {{ SALES_EMAIL }}.</div></div></div>
+
+<form id="bk" class="grid2" method="post" action="{{ url_for('booking') }}">
+  <div class="card">
+    <div class="eyebrow">Customer &amp; goods</div>
+    <div class="field"><label class="f">Customer</label>
+      <select id="customer_id" name="customer_id" required>
+        <option value="" disabled {{ 'selected' if not preselect_customer }}>Choose a customer…</option>
+        {% for c in customers %}
+        <option value="{{ c.id }}" data-product="{{ c.main_product or '' }}" data-ptype="{{ c.pricing_type }}"
+                data-tier="{{ c.tier or 'Standard' }}" data-postcode="{{ c.postcode or '' }}"
+                {{ 'selected' if preselect_customer==c.id }}>{{ c.name }}</option>
+        {% endfor %}
+      </select><div class="hint" id="custnote"></div></div>
+    <div class="field"><label class="f">Goods / product type</label>
+      <input id="goods_category" name="goods_category" placeholder="e.g. Confectionery">
+      <div class="hint">Auto-filled from the customer’s main product — change it if this job is different.</div></div>
+    <div class="field"><label class="f">Description</label>
+      <textarea name="goods_description" rows="2" placeholder="e.g. V10 mixer + 2× CDJ-3000"></textarea></div>
+    <label class="f">Quantity</label>
+    <div id="qrows"><div class="qrow">
+      <input type="number" min="1" value="1" name="qty_value">
+      <select name="qty_unit">{% for u in UNITS %}<option>{{ u }}</option>{% endfor %}</select>
+      <button type="button" class="iconbtn qx">✕</button></div></div>
+    <button type="button" class="btn btn-sm" id="addQty">＋ Add another item</button>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Schedule &amp; assignment</div>
+    <div class="row">
+      <div class="field"><label class="f">Job type</label>
+        <select id="job_type" name="job_type">
+          <option value="delivery">Delivery</option><option value="collection">Collection</option>
+          <option value="both">Collection &amp; Delivery</option><option value="multidrop">Multi-drop round</option>
+        </select></div>
+      <div class="field"><label class="f">Priority</label>
+        <select id="priority" name="priority">{% for p in PRIORITIES %}<option>{{ p }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:2"><label class="f">Delivery date</label><input type="date" name="delivery_date" value="{{ preselect_date }}" required></div>
+      <div class="field"><label class="f">Time</label><input type="time" name="delivery_time"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label class="f">Driver</label><select name="driver_id"><option value="">Assign later</option>
+        {% for d in drivers %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></div>
+      <div class="field"><label class="f">Vehicle</label><select name="vehicle_id"><option value="">Assign later</option>
+        {% for v in vehicles %}<option value="{{ v.id }}">{{ v.reg }} · {{ v.size }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="field"><label class="f" id="addrLabel">Delivery address</label><input id="delivery_address" name="delivery_address" placeholder="Street, town"></div>
+    <div class="field"><label class="f" id="pcLabel">Delivery postcode</label><input id="delivery_postcode" name="delivery_postcode" placeholder="e.g. BB4 1HG" style="max-width:200px;text-transform:uppercase"></div>
+    <div class="hint" id="mdnote" hidden>Multi-drop — postcode is set to <b>Multiple</b>. Add the drop postcodes in Route planner.</div>
+    <label class="f" style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="same_day" name="same_day" style="width:auto"> Same-day service</label>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div class="eyebrow" style="margin:0">Pricing</div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;cursor:pointer"><input type="checkbox" id="override" name="override" style="width:auto"> Custom / multidrop pricing (manual)</label>
+    </div>
+    <div class="grid2" style="margin-top:12px;align-items:start">
+      <div>
+        <div id="priceControls"></div>
+        <div style="margin-top:10px"><label class="f">Extra surcharges</label>
+          <div id="surRows"></div>
+          <button type="button" class="btn btn-sm" id="addSur">＋ Add surcharge</button></div>
+        <div id="overrideBox" hidden style="margin-top:12px">
+          <div class="row"><div class="field" style="max-width:190px;margin:0"><label class="f">Agreed price (ex VAT £)</label>
+            <input type="number" id="manual_net" name="manual_net" min="0" step="0.01" placeholder="0.00"></div>
+          <div class="field" style="max-width:150px;margin:0"><label class="f">Number of drops</label>
+            <input type="number" id="drops" name="drops" min="1" placeholder="e.g. 5"></div></div>
+          <div class="hint">Custom/multidrop is a fixed quote — the rate card and 16% surcharge aren’t applied.</div></div>
+      </div>
+      <div class="quote" id="quotePanel"></div>
+    </div>
+    <button class="btn btn-primary" type="submit" style="margin-top:16px;font-size:14px;padding:11px 18px;">✓ Confirm booking</button>
+  </div>
+</form>
+
+<!-- wavelength controls template -->
+<template id="wlTpl">
+  <label class="f">Vehicle</label>
+  <select id="wl_vehicle" name="wl_vehicle" style="margin-bottom:10px">
+    <option value="luton">3.5t Ford Box Luton · tail lift (23 mpg)</option>
+    <option value="maxus">3.5t Maxus Deliver 9 · panel (34 mpg)</option></select>
+  <label class="f">Total round-trip miles</label>
+  <input type="number" id="wl_miles" name="wl_miles" min="0" step="0.1" placeholder="e.g. 119" style="max-width:200px">
+  <label class="f" style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer"><input type="checkbox" id="wl_after6" name="wl_after6" style="width:auto"> After-6pm delivery (+£30)</label>
+</template>
+<template id="tierTpl">
+  <label class="f">Account tier</label>
+  <select id="tier" name="tier" style="max-width:220px">{% for t in TIERS %}<option>{{ t }}</option>{% endfor %}</select>
+  <div class="hint" style="margin-top:6px">Sets which rate-card column is used. Priced by delivery postcode (band) × pallets.</div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  var $=function(s,r){return (r||document).querySelector(s)};
+  var UNITS={{ UNITS|tojson }};
+  function gbp(n){return "£"+(n||0).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}
+  function gbp0(n){return "£"+Math.round(n||0).toLocaleString("en-GB")}
+  function cust(){return $("#customer_id").options[$("#customer_id").selectedIndex]}
+  function isMd(){return $("#job_type").value==="multidrop"}
+
+  function qtyRow(n,u){
+    var r=document.createElement("div"); r.className="qrow";
+    r.innerHTML='<input type="number" min="1" value="'+(n||1)+'" name="qty_value"><select name="qty_unit">'+
+      UNITS.map(function(x){return '<option'+(x===u?' selected':'')+'>'+x+'</option>'}).join("")+
+      '</select><button type="button" class="iconbtn qx">✕</button>';
+    r.querySelector(".qx").onclick=function(){ if($("#qrows").children.length>1){r.remove();quote();} };
+    r.querySelector("input").addEventListener("input",quote); r.querySelector("select").addEventListener("change",quote);
+    return r;
+  }
+  $("#addQty").onclick=function(){ $("#qrows").appendChild(qtyRow(1,"Pallet")); quote(); };
+  // wire initial row
+  var first=$("#qrows .qrow");
+  first.querySelector(".qx").onclick=function(){ if($("#qrows").children.length>1){first.remove();quote();} };
+  first.querySelector("input").addEventListener("input",quote); first.querySelector("select").addEventListener("change",quote);
+
+  function surRow(){
+    var r=document.createElement("div"); r.className="qrow";
+    r.innerHTML='<input type="text" name="sur_label" placeholder="e.g. Tail lift" style="max-width:none;flex:1">'+
+      '<input type="number" name="sur_amount" min="0" step="0.01" placeholder="£" style="max-width:92px">'+
+      '<button type="button" class="iconbtn sx">✕</button>';
+    r.querySelector(".sx").onclick=function(){r.remove();quote();};
+    r.querySelectorAll("input").forEach(function(i){i.addEventListener("input",quote)});
+    return r;
+  }
+  $("#addSur").onclick=function(){ $("#surRows").appendChild(surRow()); };
+
+  function readQty(){
+    var full=0,half=0;
+    $("#qrows").querySelectorAll(".qrow").forEach(function(r){
+      var n=parseInt(r.querySelector("input").value)||0, u=r.querySelector("select").value;
+      if(n<=0)return; if(u==="Pallet")full+=n; else if(u==="Half pallet")half+=n;
+    });
+    return {full:full,half:half};
+  }
+  function readSur(){
+    var out=[];
+    $("#surRows").querySelectorAll(".qrow").forEach(function(r){
+      var a=parseFloat(r.querySelectorAll("input")[1].value)||0;
+      if(a>0)out.push({label:r.querySelectorAll("input")[0].value||"Surcharge",amount:a});
+    });
+    return out;
+  }
+
+  function priceControls(){
+    var box=$("#priceControls"), o=cust();
+    if(!o||!o.value){box.innerHTML='<div class="hint">Choose a customer to price the job.</div>';return;}
+    if(isMd()){box.innerHTML='<div class="hint">Multi-drop round — custom priced. Enter the agreed round price; add drop postcodes in Route planner.</div>';return;}
+    var pt=o.getAttribute("data-ptype");
+    if(pt==="custom"){box.innerHTML='<div class="hint">Custom / bespoke account — enter the agreed price (custom pricing is on).</div>';return;}
+    if(pt==="wavelength"){box.innerHTML=""; box.appendChild($("#wlTpl").content.cloneNode(true));
+      box.querySelectorAll("input,select").forEach(function(e){e.addEventListener("input",quote);e.addEventListener("change",quote)});}
+    else {box.innerHTML=""; box.appendChild($("#tierTpl").content.cloneNode(true));
+      var t=box.querySelector("#tier"); if(t){t.value=o.getAttribute("data-tier")||"Standard"; t.addEventListener("change",quote);}}
+  }
+
+  function quote(){
+    var o=cust(); var q=readQty();
+    var payload={customer_id:o&&o.value?+o.value:null, job_type:$("#job_type").value,
+      postcode:$("#delivery_postcode").value, tier:($("#tier")||{}).value, full:q.full, half:q.half,
+      same_day:$("#same_day").checked, override:$("#override").checked, manual_net:($("#manual_net")||{}).value,
+      drops:($("#drops")||{}).value, vehicle:($("#wl_vehicle")||{}).value, miles:($("#wl_miles")||{}).value,
+      after6:($("#wl_after6")||{}).checked, surcharges:readSur()};
+    fetch("{{ url_for('api_quote') }}",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+      .then(function(r){return r.json()}).then(render).catch(function(){});
+  }
+  function render(q){
+    var p=$("#quotePanel");
+    if(!q.ok){p.innerHTML='<div class="qhd"><div class="lab">Quote</div><div class="big">—</div></div><div class="qlines"><div class="ql"><span class="k">'+(q.reason||"Add details to price.")+'</span></div></div>';return;}
+    var H='<div class="qhd"><div class="lab">Quote'+(q.band?' · Band '+q.band:'')+'</div><div class="big tnum">'+gbp0(q.total)+' <small>inc VAT</small></div></div><div class="qlines">';
+    q.lines.forEach(function(l){H+='<div class="ql"><span class="k">'+l.k+(l.sub?'<br><span style="font-size:11px;color:var(--muted)">'+l.sub+'</span>':'')+'</span><span class="v money">'+gbp(l.v)+'</span></div>';});
+    H+='<div class="ql sub"><span class="k">Subtotal ex VAT</span><span class="v">'+gbp(q.net)+'</span></div>';
+    H+='<div class="ql"><span class="k">VAT 20%</span><span class="v">'+gbp(q.vat)+'</span></div>';
+    H+='<div class="ql tot"><span class="k">Total inc VAT</span><span class="v">'+gbp(q.total)+'</span></div></div>';
+    p.innerHTML=H;
+  }
+
+  function onJobType(){
+    var md=isMd();
+    $("#addrLabel").textContent=md?"Region / round":"Delivery address";
+    $("#delivery_address").placeholder=md?"e.g. Lancaster round":"Street, town";
+    $("#pcLabel").textContent=md?"Delivery postcodes":"Delivery postcode";
+    $("#mdnote").hidden=!md;
+    if(md){$("#delivery_postcode").value="MULTIPLE";$("#delivery_postcode").readOnly=true;$("#priority").value="Standard";$("#override").checked=true;$("#overrideBox").hidden=false;}
+    else{if($("#delivery_postcode").value==="MULTIPLE")$("#delivery_postcode").value="";$("#delivery_postcode").readOnly=false;}
+    priceControls(); quote();
+  }
+  $("#job_type").addEventListener("change",onJobType);
+  $("#priority").addEventListener("change",function(e){if(e.target.value==="Same Day")$("#same_day").checked=true;quote();});
+  $("#override").addEventListener("change",function(e){$("#overrideBox").hidden=!e.target.checked;quote();});
+  ["#delivery_postcode","#same_day","#manual_net","#drops"].forEach(function(s){var e=$(s);if(e){e.addEventListener("input",quote);e.addEventListener("change",quote);}});
+  $("#customer_id").addEventListener("change",function(){
+    var o=cust();
+    if(o&&o.getAttribute("data-product"))$("#goods_category").value=o.getAttribute("data-product");
+    if(o){var pt=o.getAttribute("data-ptype");
+      $("#custnote").innerHTML = pt==="wavelength"?"Events pricing — distance &amp; vehicle." : (pt==="custom"?"Custom / bespoke pricing — enter the agreed quote." : "Pallet pricing — <b>"+(o.getAttribute("data-tier")||"Standard")+"</b> tier.");
+      if(o.getAttribute("data-postcode")&&!$("#delivery_postcode").value&&!isMd())$("#delivery_postcode").value=o.getAttribute("data-postcode");
+      var isC=pt==="custom"; if(!isMd()){$("#override").checked=isC;$("#overrideBox").hidden=!isC;}
+    }
+    priceControls(); quote();
+  });
+  onJobType();
+  if($("#customer_id").value) $("#customer_id").dispatchEvent(new Event("change"));
+})();
+</script>
+{% endblock %}

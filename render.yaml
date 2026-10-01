@@ -1,6 +1,9 @@
+# Render blueprint for Hoya.
+# Database: Neon Postgres (not Render's own managed Postgres) - paste the
+# Neon POOLED connection string into DATABASE_URL after first deploy.
 services:
   - type: web
-    name: heliolink-ops
+    name: hoya
     env: python
     plan: starter
     region: frankfurt
@@ -18,8 +21,18 @@ services:
         sync: false
       - key: SEED_DEMO
         value: "false"
+      - key: DEPOT_POSTCODE
+        value: "M1 1AA"
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
       - key: SALES_EMAIL
         value: "sales@heliolink.co.uk"
+      - key: MAIL_FROM
+        value: "noreply@heliolink.co.uk"
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -28,7 +41,5 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
-      - key: MAIL_FROM
-        value: "noreply@heliolink.co.uk"
       - key: PYTHON_VERSION
         value: "3.12.7"

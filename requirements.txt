@@ -5,4 +5,3 @@ Werkzeug==3.0.3
 SQLAlchemy==2.0.32
 psycopg2-binary==2.9.9
 gunicorn==22.0.0
-twilio==9.2.3

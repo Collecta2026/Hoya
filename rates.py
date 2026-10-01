@@ -1,74 +1,55 @@
 """
-Cost-based rate engine. Builds a recommended sell price bottom-up from
-round-trip mileage, fuel, driver time, fixed costs, a zone multiplier, an
-optional 24h service uplift, and a margin - then compares it against a
-customer's flat rate or standard-mode discount.
+Adapter between Hoya's Order/Customer models and pricing.py, Heliolink's
+published rate card (postcode band x account tier for pallets/half-pallets,
+a "Wavelength" events/distance mode, and a manual/custom mode for bespoke or
+multi-drop work). This replaced Hoya's earlier generic cost-based engine.
+
+Every quote returns a dict: {ok, net, vat, total, lines, basis, band, reason}.
+"net" already has the 16% fuel surcharge baked in for pallet/wavelength modes
+(pricing.py's own convention) and excludes VAT; "total" is net+VAT (gross).
+A customer discount_pct, if set, is applied on top of pricing.py's net.
 """
-from optimise import round_trip_miles, region_of
+import pricing
+
+TIERS = pricing.TIERS
 
 
-def zone_multiplier_for(postcode, zones):
-    area = region_of(postcode)
-    for z in zones:
-        prefixes = [p.strip().upper() for p in (z.outward_prefixes or "").split(",") if p.strip()]
-        if area in prefixes:
-            return z.multiplier
-    return 1.0
+def quote_for_order(order, customer, surcharges=None):
+    """order: Order instance (unsaved or saved) with pallets/wavelength/manual
+    fields already populated. customer: Customer instance. surcharges: list
+    of {"label":.., "amount":..} ad-hoc extras (optional, on top of the
+    rate-card calc). Returns the pricing.py-style breakdown dict."""
+    surcharges = surcharges or []
+    mode = (customer.pricing_mode if customer else "pallet") or "pallet"
 
+    if order.job_type == "multidrop":
+        q = pricing.price_custom(order.manual_net, drops=len(order.drops or []), multidrop=True)
+    elif mode == "wavelength":
+        q = pricing.price_wavelength(order.wl_vehicle or "luton", order.wl_miles or 0,
+                                      after6=bool(order.wl_after6), surcharges=surcharges)
+    elif mode == "custom":
+        q = pricing.price_custom(order.manual_net)
+    elif mode == "flat":
+        net = round((order.pallets or 0) * (customer.flat_rate_per_pallet or 0), 2)
+        vat = round(net * pricing.VAT, 2)
+        q = {"ok": net > 0, "reason": None if net > 0 else "No pallets to price.",
+             "net": net, "vat": vat, "total": net + vat,
+             "lines": [("Flat rate - %d pallet(s)" % (order.pallets or 0), net, None)],
+             "basis": "Flat rate per pallet", "band": None}
+    else:  # "pallet" - published rate card by postcode band + account tier
+        postcode = order.delivery_postcode if order.job_type != "collection" else order.collection_postcode
+        tier = customer.tier if customer else "Standard"
+        q = pricing.price_pallet(tier, postcode or "", order.full_pallets or 0, order.half_pallets or 0,
+                                  same_day=(order.timing == "same_day"), surcharges=surcharges)
 
-def vehicle_mpg_for(size, vehicles_by_size=None):
-    from models import Vehicle
-    return Vehicle.SIZE_MPG_DEFAULT.get(size, 25.0)
-
-
-def cost_breakdown(order, settings, zones, vehicle_size="panel_van", depot_postcode="M1"):
-    """order: object with .delivery_postcode/.collection_postcode, .pallets,
-    .timing. settings: RateSettings row. zones: list of Zone rows."""
-    postcode = order.delivery_postcode if getattr(order, "job_type", "delivery") != "collection" else order.collection_postcode
-
-    miles = round_trip_miles(depot_postcode, postcode) if settings.round_trip else round_trip_miles(depot_postcode, postcode) / 2
-    mpg = vehicle_mpg_for(vehicle_size)
-    gallons = miles / mpg
-    litres = gallons * 4.54609
-    fuel_cost = litres * settings.fuel_price_per_litre
-
-    drive_hours = miles / max(settings.avg_speed_mph, 1)
-    handling_hours = (order.pallets or 0) * settings.handling_min_per_pallet / 60.0
-    driver_cost = (drive_hours + handling_hours) * settings.driver_rate_per_hour
-
-    base_cost = fuel_cost + driver_cost + settings.fixed_cost_per_job
-
-    zmult = zone_multiplier_for(postcode, zones)
-    zoned_cost = base_cost * zmult
-
-    uplift = 0.0
-    if getattr(order, "timing", "48h") == "same_day":
-        uplift = zoned_cost * (settings.service_uplift_24h_pct / 100.0)
-
-    cost_total = zoned_cost + uplift
-    margin = cost_total * (settings.margin_pct / 100.0)
-    recommended = round(cost_total + margin, 2)
-
-    return {
-        "miles": round(miles, 1),
-        "fuel_cost": round(fuel_cost, 2),
-        "driver_cost": round(driver_cost, 2),
-        "fixed_cost": settings.fixed_cost_per_job,
-        "zone_multiplier": zmult,
-        "same_day_uplift": round(uplift, 2),
-        "cost_total": round(cost_total, 2),
-        "margin_pct": settings.margin_pct,
-        "margin_amount": round(margin, 2),
-        "recommended_sell": recommended,
-    }
-
-
-def quote_order(order, customer, settings, zones, depot_postcode="M1"):
-    """Returns the price to charge the customer for this order."""
-    if customer.pricing_mode == "flat":
-        return round((order.pallets or 0) * (customer.flat_rate_per_pallet or 0), 2)
-
-    breakdown = cost_breakdown(order, settings, zones, depot_postcode=depot_postcode)
-    price = breakdown["recommended_sell"]
-    discount = price * ((customer.discount_pct or 0) / 100.0)
-    return round(price - discount, 2)
+    if q.get("ok") and customer and customer.discount_pct:
+        factor = 1 - (customer.discount_pct / 100.0)
+        q["net"] = round(q["net"] * factor, 2)
+        q["vat"] = round(q["net"] * pricing.VAT, 2)
+        q["total"] = round(q["net"] + q["vat"], 2)
+        q["basis"] = q["basis"] + (" (-%.0f%%)" % customer.discount_pct)
+    elif q.get("ok"):
+        q["net"] = round(q["net"], 2)
+        q["vat"] = round(q["vat"], 2)
+        q["total"] = round(q["total"], 2)
+    return q

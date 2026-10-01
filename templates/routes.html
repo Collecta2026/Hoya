@@ -43,4 +43,40 @@
     {% endfor %}
   </div>
 </div>
+
+<div class="card p-3 mt-3">
+  <h5>Multi-drop rounds</h5>
+  <p class="text-muted small">A multi-drop order ("Job type: Multi-drop" on New Order) covers one round with several
+  stops. Pick a round below and add/remove its drop postcodes here — the driver app and run sheet show them in order.</p>
+  {% if md_jobs %}
+  <form method="get" class="mb-3" style="max-width:420px">
+    <select class="form-select" name="md" onchange="this.form.submit()">
+      {% for j in md_jobs %}<option value="{{ j.id }}" {% if j.id==sel_md %}selected{% endif %}>{{ j.reference }} — {{ j.customer.name }} ({{ j.drops|length }} drop(s))</option>{% endfor %}
+    </select>
+  </form>
+  {% if sel_md_job %}
+  <div class="row">
+    <div class="col-md-6">
+      <ol>
+        {% for d in sel_md_job.drops %}
+        <li class="d-flex justify-content-between align-items-center mb-1">
+          <span>{{ d.postcode }}{% if d.name %} — {{ d.name }}{% endif %}</span>
+          <form method="post" action="{{ url_for('route_del_drop', drop_id=d.id) }}">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+          </form>
+        </li>
+        {% else %}<li class="text-muted">No drops added yet.</li>{% endfor %}
+      </ol>
+    </div>
+    <div class="col-md-6">
+      <form method="post" action="{{ url_for('route_add_drop', order_id=sel_md_job.id) }}" class="d-flex gap-2">
+        <input class="form-control form-control-sm" name="postcode" placeholder="Postcode" required style="max-width:140px">
+        <input class="form-control form-control-sm" name="name" placeholder="Stop name (optional)">
+        <button class="btn btn-sm btn-primary" type="submit">Add drop</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  {% else %}<p class="text-muted">No multi-drop orders yet — create one from New Order with job type "Multi-drop".</p>{% endif %}
+</div>
 {% endblock %}

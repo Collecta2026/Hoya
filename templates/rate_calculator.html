@@ -4,15 +4,39 @@
 <div class="row g-3">
   <div class="col-md-5">
     <div class="card p-3">
-      <div class="mb-2"><label class="form-label">Delivery postcode</label><input class="form-control" id="postcode" value="M1 1AA"></div>
-      <div class="mb-2"><label class="form-label">Pallets</label><input type="number" class="form-control" id="pallets" value="2"></div>
-      <div class="mb-2"><label class="form-label">Vehicle</label>
-        <select class="form-select" id="vehicle">
-          {% for s in vehicle_sizes %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      <div class="mb-2"><label class="form-label">Customer (optional — uses their mode/tier/discount)</label>
+        <select class="form-select" id="customer">
+          <option value="">— none —</option>
+          {% for c in customers %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
         </select>
       </div>
-      <div class="mb-2"><label class="form-label">Timing</label>
-        <select class="form-select" id="timing"><option value="48h">48h</option><option value="same_day">Same day</option></select>
+      <div class="mb-2"><label class="form-label">Pricing mode</label>
+        <select class="form-select" id="mode">
+          <option value="pallet">Pallet rate card</option>
+          <option value="wavelength">Wavelength (events/distance)</option>
+          <option value="custom">Custom / bespoke</option>
+        </select>
+      </div>
+      <div id="palletFields">
+        <div class="mb-2"><label class="form-label">Delivery postcode</label><input class="form-control" id="postcode" value="M1 1AA"></div>
+        <div class="row">
+          <div class="col-6 mb-2"><label class="form-label">Full pallets</label><input type="number" class="form-control" id="full" value="2"></div>
+          <div class="col-6 mb-2"><label class="form-label">Half pallets</label><input type="number" class="form-control" id="half" value="0"></div>
+        </div>
+        <div class="mb-2"><label class="form-label">Tier</label>
+          <select class="form-select" id="tier">{% for t in tiers %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></div>
+        <div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="same_day">
+          <label class="form-check-label" for="same_day">Same day</label></div>
+      </div>
+      <div id="wlFields" class="d-none">
+        <div class="mb-2"><label class="form-label">Vehicle</label>
+          <select class="form-select" id="vehicle"><option value="luton">3.5t Luton</option><option value="maxus">3.5t Maxus</option></select></div>
+        <div class="mb-2"><label class="form-label">Round-trip miles</label><input type="number" class="form-control" id="miles" value="60"></div>
+        <div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="after6">
+          <label class="form-check-label" for="after6">After 6pm</label></div>
+      </div>
+      <div id="customFields" class="d-none">
+        <div class="mb-2"><label class="form-label">Agreed net price (£)</label><input type="number" step="0.01" class="form-control" id="manual_net"></div>
       </div>
       <button class="btn btn-primary" id="calcBtn">Calculate</button>
     </div>
@@ -20,26 +44,48 @@
   <div class="col-md-7">
     <div class="card p-3">
       <h5>Result</h5>
-      <table class="table table-sm" id="resultTable"><tbody></tbody></table>
+      <div id="resultBox"><p class="text-muted small">Fill in the form and click Calculate.</p></div>
     </div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
+var modeSel = document.getElementById("mode");
+function toggleFields() {
+  document.getElementById("palletFields").classList.toggle("d-none", modeSel.value !== "pallet");
+  document.getElementById("wlFields").classList.toggle("d-none", modeSel.value !== "wavelength");
+  document.getElementById("customFields").classList.toggle("d-none", modeSel.value !== "custom");
+}
+modeSel.addEventListener("change", toggleFields);
+toggleFields();
+
 document.getElementById("calcBtn").addEventListener("click", function() {
-  fetch("{{ url_for('api_recommend') }}", {
+  fetch("{{ url_for('api_quote') }}", {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
+      customer_id: document.getElementById("customer").value || null,
+      mode: modeSel.value,
       postcode: document.getElementById("postcode").value,
-      pallets: document.getElementById("pallets").value,
+      full: document.getElementById("full").value,
+      half: document.getElementById("half").value,
+      tier: document.getElementById("tier").value,
+      same_day: document.getElementById("same_day").checked,
       vehicle: document.getElementById("vehicle").value,
-      timing: document.getElementById("timing").value,
+      miles: document.getElementById("miles").value,
+      after6: document.getElementById("after6").checked,
+      manual_net: document.getElementById("manual_net").value,
     })
-  }).then(r => r.json()).then(data => {
-    var rows = "";
-    for (var key in data) { rows += "<tr><th>" + key + "</th><td>" + data[key] + "</td></tr>"; }
-    document.querySelector("#resultTable tbody").innerHTML = rows;
+  }).then(r => r.json()).then(function(q) {
+    var box = document.getElementById("resultBox");
+    if (!q.ok) { box.innerHTML = '<p class="text-danger">' + (q.reason || "Can't price this.") + '</p>'; return; }
+    var lines = (q.lines || []).map(function(l) {
+      return '<tr><td>' + l[0] + (l[2] ? ' <span class="text-muted small">(' + l[2] + ')</span>' : '') + '</td><td class="text-end">£' + l[1].toFixed(2) + '</td></tr>';
+    }).join("");
+    box.innerHTML = '<p class="text-muted small">' + q.basis + '</p><table class="table table-sm">' + lines +
+      '<tr><th>Net</th><td class="text-end">£' + q.net.toFixed(2) + '</td></tr>' +
+      '<tr><th>VAT</th><td class="text-end">£' + q.vat.toFixed(2) + '</td></tr>' +
+      '<tr><th>Total</th><td class="text-end"><b>£' + q.total.toFixed(2) + '</b></td></tr></table>';
   });
 });
 </script>

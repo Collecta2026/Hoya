@@ -7,8 +7,13 @@
 {% if order.pod %}
 <p><b>Status:</b> {{ order.status }}</p>
 <p><b>Recipient:</b> {{ order.pod.recipient_name or '—' }}</p>
-<p><b>Signed:</b> {{ order.pod.signature_data_url or '—' }}</p>
-{% if order.pod.photo_data_url %}<img src="{{ order.pod.photo_data_url }}" class="img-fluid rounded mb-2">{% endif %}
+<p><b>Signature:</b></p>
+{% if order.pod.signature_data_url and order.pod.signature_data_url.startswith('data:image') %}
+  <img src="{{ order.pod.signature_data_url }}" class="border rounded mb-2" style="background:#fff;max-width:300px">
+{% elif order.pod.signature_data_url %}
+  <p class="fst-italic">{{ order.pod.signature_data_url }}</p>
+{% else %}<p class="text-muted">—</p>{% endif %}
+{% if order.pod.photo_data_url %}<p><b>Photo:</b></p><img src="{{ order.pod.photo_data_url }}" class="img-fluid rounded mb-2" style="max-width:300px">{% endif %}
 <p><b>Boxes confirmed:</b> {{ order.pod.boxes_confirmed }}/{{ order.pod.boxes_confirmed + order.pod.boxes_missing }}</p>
 {% if order.pod.exception_reason %}<p class="text-danger">Exception: {{ order.pod.exception_reason }}</p>{% endif %}
 <p class="text-muted">{{ order.pod.delivered_at.strftime('%Y-%m-%d %H:%M') }}</p>

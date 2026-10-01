@@ -49,10 +49,14 @@
 </div>
 <div class="card p-4 mb-3 help-anchor" id="orders-detail">
   <h4>Creating &amp; managing orders</h4>
-  <p><b>New Order</b> (Operations → New Order) captures a delivery or collection job: addresses, contact
-  details, pallets/parcels, weight, scheduling (collection/delivery date, same-day/48h/booked timing) and
-  notes. On save, Hoya automatically generates a barcode label for every pallet and parcel, and produces a
-  quoted price using the rate engine (or the customer's flat rate, if set).</p>
+  <p><b>New Order</b> (Operations → New Order) captures a delivery, collection, or multi-drop round:
+  addresses, contact details, an "Add line" quantity builder (pick any mix of pallet/half-pallet/box/parcel/
+  basket/flight case/cage/crate/item), weight, scheduling and notes. Click <b>Get quote</b> to preview the
+  price breakdown before saving. On save, Hoya generates a barcode label for every pallet and parcel, prices
+  the job using the customer's pricing mode (see Customers below), and emails sales@ a booking confirmation
+  alongside the usual customer SMS.</p>
+  <p><b>Schedule</b> (top nav) shows every booking on a weekly calendar, colour-coded by status, with a
+  one-click "+ add" into any day — a faster way to see the week at a glance than the dispatch board.</p>
   <p>The <b>Dispatch Board</b> (Operations → Dispatch Board) is a kanban-style view of every order grouped
   by status: Pending → Assigned → Picked Up → In Transit → Delivered/Failed. Click any order to open its
   detail page, where you can assign a driver/vehicle, change status, add surcharges, print labels, and see
@@ -64,6 +68,8 @@
   <p>Select a driver and tick the unassigned orders to include, then <b>Build &amp; Optimise Route</b>.
   Stops are automatically sequenced using nearest-neighbour routing over UK postcode areas — no mapping API
   key required. You can re-optimise an existing driver's active stops at any time from the same page.</p>
+  <p>The <b>Multi-drop rounds</b> panel on this page manages the individual drop postcodes for any order
+  booked as a "Multi-drop round" — pick the round from the dropdown, then add or remove drops.</p>
 </div>
 
 <div class="card p-4 mb-3 help-anchor" id="pending">
@@ -85,12 +91,16 @@
 
 <div class="card p-4 mb-3 help-anchor" id="customers">
   <h4>Customers &amp; rate settings</h4>
-  <p>Each customer is either <b>flat-rate</b> (a fixed £ per pallet you set directly) or <b>standard</b>
-  (priced by the cost-based rate engine, less an optional discount %). <b>Rate Settings</b> holds the cost
-  parameters (fuel price, driver £/hour, average speed, handling time, fixed cost, margin %, same-day
-  uplift) with a worked example. <b>Regions &amp; Zones</b> lets you set a cost multiplier per UK postcode
-  area group (e.g. Scotland costs more to serve than the Midlands). <b>Rate Calculator</b> gives an
-  interactive what-if breakdown for any postcode/pallet count/vehicle/timing combination.</p>
+  <p>Each customer has a pricing mode, set and edited from the Customers page's "Edit pricing" panel:
+  <b>Pallet rate card</b> (the published postcode-band x account-tier rates — Standard/Trade/Key/Major —
+  with the 16% fuel surcharge and 20% VAT built in), <b>Wavelength</b> (events/distance pricing: vehicle mpg
+  x round-trip miles, for one-off jobs), <b>Custom</b> (a manually agreed net price), or legacy <b>Flat</b>
+  rate per pallet. A discount % applies on top of whichever mode is used. <b>Rate Calculator</b> gives an
+  interactive what-if breakdown for any of these modes before you book. <b>Rate Settings</b> and
+  <b>Regions &amp; Zones</b> are now only used by the legacy Flat mode's VAT rate.</p>
+  <p>Each customer row also has a <b>portal login</b> control — click "Set up login" / "Manage login" to
+  create or reset the email/password a customer uses at <code>/portal/login</code> to place and track their
+  own orders, or "Disable" to revoke access without deleting the customer.</p>
 </div>
 
 <div class="card p-4 mb-3 help-anchor" id="invoicing">
@@ -156,12 +166,14 @@
 <div class="card p-4 mb-3 help-anchor" id="driver">
   <h4>Using the driver app</h4>
   <p>Sign in with your name and PIN. <b>My Route</b> shows your stops in optimised order, with the next
-  stop highlighted. Opening a stop shows the address, contact, and a scan gate — scan every box (camera or
+  stop highlighted. Opening a stop shows the address, contact, a branded <b>delivery note</b> summary (view
+  or print it separately with the "View delivery note" button), and a scan gate — scan every box (camera or
   type the code manually) before you can complete the stop, unless you tick the override checkbox. Use the
-  Google Maps / Waze buttons to navigate. To close a stop, enter the recipient's name, a typed signature,
-  optionally take a photo, add notes, then <b>Confirm &amp; Complete Stop</b> — this automatically advances
-  you to the next stop on your route. If something goes wrong (no answer, refused, damaged), fill in the
-  exception reason instead and the stop is logged as failed with the reason recorded.</p>
+  Google Maps / Waze buttons to navigate. To close a stop, enter the recipient's name, get them to sign with
+  a finger or mouse on the signature pad, optionally take a photo, add notes, then <b>Confirm &amp; Complete
+  Stop</b> — this automatically advances you to the next stop on your route. If something goes wrong (no
+  answer, refused, damaged), fill in the exception reason instead and the stop is logged as failed with the
+  reason recorded.</p>
 </div>
 {% endif %}
 

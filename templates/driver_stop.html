@@ -12,6 +12,8 @@
      href="https://www.google.com/maps/dir/?api=1&destination={{ (order.delivery_address if order.job_type=='delivery' else order.collection_address)|urlencode }}">Google Maps</a>
   <a class="btn btn-outline-secondary btn-sm" target="_blank"
      href="https://www.waze.com/ul?q={{ (order.delivery_postcode if order.job_type=='delivery' else order.collection_postcode)|urlencode }}&navigate=yes">Waze</a>
+  <a class="btn btn-outline-secondary btn-sm" target="_blank"
+     href="{{ url_for('delivery_note', order_id=order.id) }}">View delivery note</a>
 </div>
 
 <div class="card p-3 mb-3">
@@ -31,10 +33,27 @@
 </div>
 
 <div class="card p-3">
-  <h5>Complete stop</h5>
+  <h5>Delivery note — complete &amp; sign</h5>
+  <div class="border rounded p-2 mb-3 bg-light">
+    <div class="fw-bold text-primary small">HELIOLINK LOGISTICS — DELIVERY NOTE</div>
+    <table class="table table-sm mb-0 mt-1">
+      <tr><th class="small">Order</th><td class="small">{{ order.reference }}</td></tr>
+      <tr><th class="small">Customer</th><td class="small">{{ order.customer.name }}</td></tr>
+      <tr><th class="small">Goods</th><td class="small">{{ order.pallets }} pallet(s), {{ order.parcels }} parcel(s){% if order.total_weight_kg %} &middot; {{ order.total_weight_kg }}kg{% endif %}</td></tr>
+      {% if order.cod_amount %}<tr><th class="small">COD due</th><td class="small">£{{ '%.2f'|format(order.cod_amount) }}</td></tr>{% endif %}
+    </table>
+  </div>
   <form method="post" action="{{ url_for('driver_complete', order_id=order.id) }}" id="completeForm">
-    <div class="mb-2"><label class="form-label">Recipient name</label><input class="form-control" name="recipient_name"></div>
-    <div class="mb-2"><label class="form-label">Signature (type full name to confirm)</label><input class="form-control" name="signature_data_url"></div>
+    <div class="mb-2"><label class="form-label">Recipient name</label><input class="form-control" name="recipient_name" required></div>
+    <div class="mb-2">
+      <label class="form-label">Recipient signature</label>
+      <canvas id="sigPad" style="width:100%;height:150px;border:1px solid #ccc;border-radius:6px;touch-action:none;"></canvas>
+      <div class="d-flex justify-content-between mt-1">
+        <span class="text-muted small">Sign with finger or mouse</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="sigClear">Clear</button>
+      </div>
+      <input type="hidden" name="signature_data_url" id="sigData">
+    </div>
     <div class="mb-2"><label class="form-label">Photo</label>
       <input type="file" accept="image/*" capture="environment" class="form-control" id="photoInput">
       <input type="hidden" name="photo_data_url" id="photoData">
@@ -59,7 +78,19 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="{{ url_for('static', filename='js/signature.js') }}"></script>
 <script>
+initSignaturePad({ canvasId: "sigPad", hiddenInputId: "sigData", clearBtnId: "sigClear" });
+
+document.getElementById("completeForm").addEventListener("submit", function(e) {
+  var exception = this.querySelector('[name="exception_reason"]').value.trim();
+  var sig = document.getElementById("sigData").value;
+  if (!exception && !sig) {
+    e.preventDefault();
+    alert("Please get the recipient's signature before completing the stop (or fill in an exception reason instead).");
+  }
+});
+
 function submitScan(code) {
   fetch("{{ url_for('driver_scan', order_id=order.id) }}", {
     method: "POST",

@@ -6,6 +6,7 @@ body { font-family: Arial, sans-serif; }
 .label { width: 4in; height: 4in; border: 2px solid #000; padding: 10px; margin: 10px; display: inline-block; box-sizing: border-box; }
 .label h4 { margin: 4px 0; }
 .label .meta { font-size: 13px; }
+.label .brand { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #1450a3; }
 .label { overflow: hidden; }
 .barcode { max-width: 100%; height: auto; display: block; }
 @media print { .no-print { display: none; } }
@@ -15,9 +16,10 @@ body { font-family: Arial, sans-serif; }
 <div class="no-print p-2"><button onclick="window.print()">Print</button></div>
 {% for b in order.boxes %}
 <div class="label">
+  <div class="brand">HELIOLINK LOGISTICS</div>
   <h4>{{ order.reference }}</h4>
   <div class="meta"><b>Deliver to:</b><br>{{ order.delivery_address }}<br>{{ order.delivery_postcode }}</div>
-  <div class="meta">{{ b.kind|capitalize }} {{ b.label_index }} &middot; Pallets: {{ order.pallets }} &middot; Weight/pallet: {{ order.weight_per_pallet_kg }}kg &middot; Total: {{ order.total_weight_kg }}kg</div>
+  <div class="meta">{{ b.kind|capitalize }} {{ b.label_index }} of {{ order.pallets if b.kind=='pallet' else order.parcels }} &middot; Weight/pallet: {{ order.weight_per_pallet_kg }}kg &middot; Total: {{ order.total_weight_kg }}kg</div>
   <svg class="barcode" jsbarcode-value="{{ b.barcode }}" jsbarcode-height="55" jsbarcode-width="1" jsbarcode-fontsize="11" jsbarcode-margin="0"></svg>
 </div>
 {% else %}

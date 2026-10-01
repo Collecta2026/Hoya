@@ -1,0 +1,64 @@
+{% extends "base.html" %}{% block title %}Schedule{% endblock %}
+{% block content %}
+{% set dow = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+<style>
+  .cal { display:grid; grid-template-columns: repeat(7, 1fr); gap:8px; }
+  .day { border:1px solid #e3e6ea; border-radius:8px; background:#fff; min-height:220px; display:flex; flex-direction:column; }
+  .day.today { border-color:#1450a3; box-shadow:0 0 0 1px #1450a3 inset; }
+  .dhead { display:flex; justify-content:space-between; align-items:center; padding:6px 8px; border-bottom:1px solid #eee; font-size:13px; }
+  .dhead .dow { font-weight:700; }
+  .dhead .dnum { color:#666; }
+  .addbtn { text-decoration:none; color:#1450a3; font-weight:700; }
+  .dbody { padding:6px; display:flex; flex-direction:column; gap:6px; overflow-y:auto; max-height:420px; }
+  .job { display:block; border:1px solid #dde3ea; border-radius:6px; padding:6px 8px; font-size:12px; text-decoration:none; color:#222; background:#f8f9fb; }
+  .job:hover { background:#eef2f8; }
+  .job .jtop { display:flex; justify-content:space-between; margin-bottom:2px; }
+  .job .jcust { font-weight:700; }
+  .job .jmeta { color:#666; display:flex; gap:8px; margin-top:2px; }
+  .job .jprice { color:#1450a3; font-weight:600; }
+  .chip { background:#e3e9f2; border-radius:10px; padding:0 6px; font-size:10px; }
+  .empty { display:block; text-align:center; color:#aaa; font-size:12px; padding:14px 4px; text-decoration:none; }
+  .empty b { display:block; color:#1450a3; margin-top:4px; }
+  @media (max-width: 900px) { .cal { grid-template-columns: 1fr; } }
+</style>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div><h3 class="mb-0">Delivery Schedule</h3>
+    <div class="text-muted small">Week of {{ week_start.strftime('%d %b') }} – {{ week_end.strftime('%d %b %Y') }}</div></div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-primary btn-sm" href="{{ url_for('order_new', date=today.isoformat()) }}">+ New booking</a>
+    <div class="btn-group btn-group-sm">
+      <a class="btn btn-outline-secondary" href="{{ url_for('schedule', week=prev_week) }}">&lsaquo;</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('schedule', week=this_week) }}">This week</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('schedule', week=next_week) }}">&rsaquo;</a>
+    </div>
+  </div>
+</div>
+<div class="cal">
+  {% for d in days %}
+  <div class="day {{ 'today' if d == today }}">
+    <div class="dhead">
+      <div><span class="dow">{{ dow[loop.index0] }}</span> <span class="dnum">{{ d.strftime('%d %b') }}</span></div>
+      <a class="addbtn" href="{{ url_for('order_new', date=d.isoformat()) }}" title="Book">+</a>
+    </div>
+    <div class="dbody">
+      {% for o in by_day[d] %}
+      <a class="job" href="{{ url_for('order_detail', order_id=o.id) }}">
+        <div class="jtop"><span>{{ o.delivery_time or '—' }}</span>
+          <span class="chip">{{ status_labels[o.status] }}</span></div>
+        <div class="jcust">{{ o.customer.name }}</div>
+        {% if o.goods_category %}<div>{{ o.goods_category }}</div>{% endif %}
+        {% if o.quantity_summary %}<div>▪ {{ o.quantity_summary }}</div>{% endif %}
+        {% if o.quoted_price %}<div class="jprice">£{{ '%.2f'|format(o.quoted_price) }} inc VAT</div>{% endif %}
+        <div class="jmeta">
+          {% if o.job_type != 'delivery' %}<span class="chip">{{ 'Multi-drop' if o.job_type=='multidrop' else o.job_type }}</span>{% endif %}
+          <span>{{ o.driver.name if o.driver else 'Unassigned' }}</span>
+        </div>
+      </a>
+      {% else %}
+      <a class="empty" href="{{ url_for('order_new', date=d.isoformat()) }}">No deliveries<b>+ add</b></a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

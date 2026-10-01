@@ -1,17 +1,21 @@
 {% extends "base.html" %}{% block title %}New Order{% endblock %}
 {% block content %}
 <h3 class="mb-3">New Order</h3>
-<form method="post" class="card p-4" style="max-width:760px">
+<div class="row g-3">
+<div class="col-lg-8">
+<form method="post" class="card p-4" id="orderForm">
   <div class="row">
     <div class="col-md-6 mb-3"><label class="form-label">Customer</label>
-      <select name="customer_id" class="form-select" required>
-        {% for c in customers %}<option value="{{ c.id }}" {% if preselect_customer and preselect_customer==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      <select name="customer_id" id="customerSelect" class="form-select" required>
+        {% for c in customers %}<option value="{{ c.id }}" data-mode="{{ c.pricing_mode }}" data-tier="{{ c.tier }}" data-product="{{ c.main_product or '' }}"
+          {% if preselect_customer and preselect_customer==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
       </select>
     </div>
     <div class="col-md-6 mb-3"><label class="form-label">Job type</label>
-      <select name="job_type" class="form-select">
+      <select name="job_type" id="jobType" class="form-select">
         <option value="delivery">Delivery</option>
         <option value="collection">Collection</option>
+        <option value="multidrop">Multi-drop round</option>
       </select>
     </div>
   </div>
@@ -21,11 +25,17 @@
     <div class="col-md-4 mb-3"><label class="form-label">Collection postcode</label>
       <input class="form-control" name="collection_postcode"></div>
   </div>
-  <div class="row">
+  <div class="row" id="singleDestRow">
     <div class="col-md-8 mb-3"><label class="form-label">Delivery address *</label>
-      <input class="form-control" name="delivery_address" required></div>
+      <input class="form-control" name="delivery_address" id="deliveryAddress" required></div>
     <div class="col-md-4 mb-3"><label class="form-label">Delivery postcode *</label>
-      <input class="form-control" name="delivery_postcode" required placeholder="e.g. M1 1AA"></div>
+      <input class="form-control" name="delivery_postcode" id="deliveryPostcode" required placeholder="e.g. M1 1AA"></div>
+  </div>
+  <div class="row d-none" id="multidropRow">
+    <div class="col-md-12 mb-3"><label class="form-label">Round / region name</label>
+      <input class="form-control" name="delivery_region" placeholder="e.g. Greater Manchester round">
+      <div class="form-text">Add the individual drop postcodes afterwards from the Route Planner's "Multi-drop rounds" panel.</div>
+    </div>
   </div>
   <div class="row">
     <div class="col-md-6 mb-3"><label class="form-label">Contact name</label>
@@ -33,23 +43,25 @@
     <div class="col-md-6 mb-3"><label class="form-label">Contact phone</label>
       <input class="form-control" name="contact_phone"></div>
   </div>
+
+  <hr>
   <div class="row">
-    <div class="col-md-3 mb-3"><label class="form-label">Pallets</label>
-      <input type="number" min="0" class="form-control" name="pallets" value="0"></div>
-    <div class="col-md-3 mb-3"><label class="form-label">Parcels</label>
-      <input type="number" min="0" class="form-control" name="parcels" value="0"></div>
-    <div class="col-md-3 mb-3"><label class="form-label">Weight per pallet (kg)</label>
-      <input type="number" step="0.1" class="form-control" name="weight_per_pallet_kg" value="0"></div>
-    <div class="col-md-3 mb-3"><label class="form-label">Priority</label>
-      <select name="priority" class="form-select"><option value="standard">Standard</option><option value="express">Express</option></select></div>
+    <div class="col-md-6 mb-3"><label class="form-label">Goods category</label>
+      <input class="form-control" name="goods_category" id="goodsCategory" placeholder="e.g. Confectionery"></div>
+    <div class="col-md-6 mb-3"><label class="form-label">Goods description</label>
+      <input class="form-control" name="goods_description"></div>
   </div>
+  <label class="form-label">Quantities</label>
+  <div id="qtyRows"></div>
+  <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="addQtyRow">+ Add line</button>
+
   <div class="row">
-    <div class="col-md-4 mb-3"><label class="form-label">Collection date</label>
-      <input type="date" class="form-control" name="collection_date"></div>
-    <div class="col-md-4 mb-3"><label class="form-label">Delivery date</label>
-      <input type="date" class="form-control" name="delivery_date" value="{{ today }}"></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Weight per pallet (kg)</label>
+      <input type="number" step="0.1" class="form-control" name="weight_per_pallet_kg" value="0"></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Priority</label>
+      <select name="priority" class="form-select"><option value="standard">Standard</option><option value="express">Express</option></select></div>
     <div class="col-md-4 mb-3"><label class="form-label">Timing</label>
-      <select name="timing" class="form-select">
+      <select name="timing" id="timing" class="form-select">
         <option value="same_day">Same day</option>
         <option value="48h" selected>48 hours</option>
         <option value="booked">Booked slot</option>
@@ -57,11 +69,129 @@
     </div>
   </div>
   <div class="row">
-    <div class="col-md-4 mb-3"><label class="form-label">Cash on delivery amount (£, optional)</label>
+    <div class="col-md-4 mb-3"><label class="form-label">Collection date</label>
+      <input type="date" class="form-control" name="collection_date"></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Delivery date</label>
+      <input type="date" class="form-control" name="delivery_date" value="{{ preselect_date }}"></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Cash on delivery (£, optional)</label>
       <input type="number" step="0.01" min="0" class="form-control" name="cod_amount" value="0"></div>
   </div>
+
+  <div id="wavelengthFields" class="d-none row border rounded p-2 mb-3 bg-light">
+    <div class="col-md-4 mb-2"><label class="form-label">Vehicle</label>
+      <select class="form-select" name="wl_vehicle"><option value="luton">3.5t Luton</option><option value="maxus">3.5t Maxus</option></select></div>
+    <div class="col-md-4 mb-2"><label class="form-label">Round-trip miles</label>
+      <input type="number" step="1" class="form-control" name="wl_miles"></div>
+    <div class="col-md-4 mb-2 form-check mt-4"><input class="form-check-input" type="checkbox" name="wl_after6" id="after6">
+      <label class="form-check-label" for="after6">After 6pm</label></div>
+  </div>
+  <div id="customFields" class="d-none row border rounded p-2 mb-3 bg-light">
+    <div class="col-md-6 mb-2"><label class="form-label">Agreed net price (£, ex VAT)</label>
+      <input type="number" step="0.01" class="form-control" name="manual_net"></div>
+  </div>
+
   <div class="mb-3"><label class="form-label">Package notes</label>
     <textarea class="form-control" name="notes" rows="2"></textarea></div>
-  <button class="btn btn-primary" type="submit">Create Order</button>
+  <div class="d-flex gap-2">
+    <button type="button" class="btn btn-outline-primary" id="getQuoteBtn">Get quote</button>
+    <button class="btn btn-primary" type="submit">Create Order</button>
+  </div>
 </form>
+</div>
+<div class="col-lg-4">
+  <div class="card p-3">
+    <h5>Quote preview</h5>
+    <div id="quoteResult"><p class="text-muted small">Fill in the form and click "Get quote".</p></div>
+  </div>
+</div>
+</div>
+
+<template id="qtyRowTpl">
+  <div class="row qty-row">
+    <div class="col-5 mb-2"><input type="number" min="1" class="form-control" name="qty_value" placeholder="Qty"></div>
+    <div class="col-6 mb-2">
+      <select class="form-select" name="qty_unit">
+        {% for u in units %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-1 mb-2"><button type="button" class="btn btn-sm btn-outline-danger removeQtyRow">&times;</button></div>
+  </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function addQtyRow() {
+  var tpl = document.getElementById("qtyRowTpl").content.cloneNode(true);
+  tpl.querySelector(".removeQtyRow").addEventListener("click", function(e) {
+    e.target.closest(".qty-row").remove();
+  });
+  document.getElementById("qtyRows").appendChild(tpl);
+}
+document.getElementById("addQtyRow").addEventListener("click", addQtyRow);
+addQtyRow();
+
+var jobType = document.getElementById("jobType");
+function toggleMultidrop() {
+  var md = jobType.value === "multidrop";
+  document.getElementById("singleDestRow").classList.toggle("d-none", md);
+  document.getElementById("multidropRow").classList.toggle("d-none", !md);
+  document.getElementById("deliveryAddress").required = !md;
+  document.getElementById("deliveryPostcode").required = !md;
+  document.getElementById("customFields").classList.toggle("d-none", !md && customerSelect.selectedOptions[0].dataset.mode !== "custom");
+}
+jobType.addEventListener("change", toggleMultidrop);
+
+var customerSelect = document.getElementById("customerSelect");
+function toggleModeFields() {
+  var opt = customerSelect.selectedOptions[0];
+  if (!opt) return;
+  var mode = opt.dataset.mode;
+  document.getElementById("wavelengthFields").classList.toggle("d-none", mode !== "wavelength");
+  document.getElementById("customFields").classList.toggle("d-none", mode !== "custom" && jobType.value !== "multidrop");
+  if (!document.getElementById("goodsCategory").value) {
+    document.getElementById("goodsCategory").value = opt.dataset.product || "";
+  }
+}
+customerSelect.addEventListener("change", toggleModeFields);
+toggleModeFields();
+toggleMultidrop();
+
+document.getElementById("getQuoteBtn").addEventListener("click", function() {
+  var full = 0, half = 0;
+  document.querySelectorAll(".qty-row").forEach(function(row) {
+    var val = parseInt(row.querySelector('[name="qty_value"]').value) || 0;
+    var unit = row.querySelector('[name="qty_unit"]').value;
+    if (unit === "Pallet") full += val;
+    if (unit === "Half pallet") half += val;
+  });
+  var opt = customerSelect.selectedOptions[0];
+  var payload = {
+    customer_id: customerSelect.value,
+    job_type: jobType.value,
+    postcode: document.getElementById("deliveryPostcode").value,
+    full: full, half: half,
+    same_day: document.getElementById("timing").value === "same_day",
+    vehicle: (document.querySelector('[name="wl_vehicle"]') || {}).value,
+    miles: (document.querySelector('[name="wl_miles"]') || {}).value,
+    after6: (document.getElementById("after6") || {}).checked,
+    manual_net: (document.querySelector('[name="manual_net"]') || {}).value,
+  };
+  fetch("{{ url_for('api_quote') }}", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(function(q) {
+    var box = document.getElementById("quoteResult");
+    if (!q.ok) { box.innerHTML = '<p class="text-danger small">' + (q.reason || "Can't price this yet.") + '</p>'; return; }
+    var lines = (q.lines || []).map(function(l) {
+      return '<tr><td>' + l[0] + '</td><td class="text-end">£' + l[1].toFixed(2) + '</td></tr>';
+    }).join("");
+    box.innerHTML = '<p class="small text-muted">' + q.basis + '</p>' +
+      '<table class="table table-sm">' + lines +
+      '<tr><th>Net</th><td class="text-end">£' + q.net.toFixed(2) + '</td></tr>' +
+      '<tr><th>VAT</th><td class="text-end">£' + q.vat.toFixed(2) + '</td></tr>' +
+      '<tr><th>Total</th><td class="text-end"><b>£' + q.total.toFixed(2) + '</b></td></tr></table>';
+  });
+});
+</script>
 {% endblock %}

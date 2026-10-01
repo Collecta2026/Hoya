@@ -3,20 +3,30 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3>{{ order.reference }} <span class="badge bg-secondary badge-status">{{ status_labels[order.status] }}</span></h3>
   <a class="btn btn-outline-secondary" href="{{ url_for('order_label', order_id=order.id) }}" target="_blank">Print Labels</a>
+  <a class="btn btn-outline-secondary" href="{{ url_for('delivery_note', order_id=order.id) }}" target="_blank">Delivery Note</a>
 </div>
 <div class="row g-3">
   <div class="col-md-7">
     <div class="card p-3 mb-3">
       <h5>Shipment details</h5>
       <table class="table table-sm">
-        <tr><th>Customer</th><td>{{ order.customer.name }}</td></tr>
-        <tr><th>Job type</th><td>{{ order.job_type }}</td></tr>
+        <tr><th>Customer</th><td>{{ order.customer.name }}{% if order.goods_category %} &middot; {{ order.goods_category }}{% endif %}</td></tr>
+        <tr><th>Job type</th><td>{{ 'Multi-drop round' if order.is_multidrop else order.job_type }}</td></tr>
         <tr><th>Collection</th><td>{{ order.collection_address }} ({{ order.collection_postcode }})</td></tr>
+        {% if order.is_multidrop %}
+        <tr><th>Drops</th><td>
+          {% if order.drops %}<ol class="mb-0 ps-3">{% for d in order.drops %}<li>{{ d.postcode }}{% if d.name %} — {{ d.name }}{% endif %}</li>{% endfor %}</ol>
+          {% else %}<span class="text-muted">No drops added yet — manage from Route Planner.</span>{% endif %}
+        </td></tr>
+        {% else %}
         <tr><th>Delivery</th><td>{{ order.delivery_address }} ({{ order.delivery_postcode }})</td></tr>
+        {% endif %}
         <tr><th>Contact</th><td>{{ order.contact_name }} — {{ order.contact_phone }}</td></tr>
-        <tr><th>Pallets / Parcels</th><td>{{ order.pallets }} / {{ order.parcels }} ({{ order.total_weight_kg }} kg)</td></tr>
+        <tr><th>Quantities</th><td>{{ order.quantity_summary or (order.pallets ~ ' pallet(s), ' ~ order.parcels ~ ' parcel(s)') }} ({{ order.total_weight_kg }} kg)</td></tr>
         <tr><th>Schedule</th><td>Collect {{ order.collection_date or '—' }} · Deliver {{ order.delivery_date or '—' }} · {{ order.timing }}</td></tr>
-        <tr><th>Quoted price</th><td>£{{ '%.2f'|format(order.quoted_price or 0) }}</td></tr>
+        <tr><th>Quoted price</th><td>£{{ '%.2f'|format(order.quoted_price or 0) }} inc VAT
+          {% if order.price_net %}<span class="text-muted small">(£{{ '%.2f'|format(order.price_net) }} net + £{{ '%.2f'|format(order.price_vat or 0) }} VAT)</span>{% endif %}
+          {% if order.price_basis %}<div class="text-muted small">{{ order.price_basis }}</div>{% endif %}</td></tr>
         {% if order.cod_amount %}
         <tr><th>Cash on delivery</th><td>£{{ '%.2f'|format(order.cod_amount) }} {% if order.cod_collected %}<span class="badge bg-success">Collected</span>{% else %}<span class="badge bg-secondary">Not yet collected</span>{% endif %}</td></tr>
         {% endif %}
@@ -95,8 +105,13 @@
     <div class="card p-3 mb-3">
       <h5>Proof of Delivery</h5>
       <p><b>Recipient:</b> {{ order.pod.recipient_name or '—' }}</p>
-      <p><b>Signature:</b> {{ order.pod.signature_data_url or '—' }}</p>
-      {% if order.pod.photo_data_url %}<img src="{{ order.pod.photo_data_url }}" class="img-fluid rounded mb-2">{% endif %}
+      <p><b>Signature:</b></p>
+      {% if order.pod.signature_data_url and order.pod.signature_data_url.startswith('data:image') %}
+        <img src="{{ order.pod.signature_data_url }}" class="border rounded mb-2" style="background:#fff;max-width:300px">
+      {% elif order.pod.signature_data_url %}
+        <p class="fst-italic">{{ order.pod.signature_data_url }}</p>
+      {% else %}<p class="text-muted">—</p>{% endif %}
+      {% if order.pod.photo_data_url %}<p><b>Photo:</b></p><img src="{{ order.pod.photo_data_url }}" class="img-fluid rounded mb-2" style="max-width:300px">{% endif %}
       <p><b>Boxes confirmed:</b> {{ order.pod.boxes_confirmed }} / {{ order.pod.boxes_confirmed + order.pod.boxes_missing }}</p>
       {% if order.pod.exception_reason %}<p class="text-danger"><b>Exception:</b> {{ order.pod.exception_reason }}</p>{% endif %}
       <p class="text-muted small">{{ order.pod.delivered_at.strftime('%Y-%m-%d %H:%M') }}</p>

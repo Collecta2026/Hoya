@@ -1,0 +1,206 @@
+/* =====================================================================
+   HELIOLINK THEME  —  skin overrides for Hoya
+   ---------------------------------------------------------------------
+   This file ONLY changes how the app looks (colours, the top bar, the
+   logo, fonts). It does NOT touch pricing, the database, or any logic.
+   It is loaded AFTER Bootstrap, so these rules win.
+
+   Brand colours:
+     Orange   #FF6A06   (hover #d4560a)
+     Ink/text #1E2330
+     Navy     #161A24   (used for dark mode)
+   ===================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+:root{
+  --hl-orange:#FF6A06;
+  --hl-orange-dark:#d4560a;
+  --hl-orange-tint:#fff2e9;
+  --hl-ink:#1E2330;
+  --hl-muted:#6b7280;
+  --hl-line:#e6e8ec;
+  --hl-blue:#0056a7;
+  --hl-navy:#161A24;
+}
+
+/* ---- Typography -------------------------------------------------- */
+body{
+  font-family:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,
+              "Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--hl-ink);
+}
+
+/* =====================================================================
+   1. TOP BAR  —  navy Hoya bar (.hoya-nav)  ->  clean white bar
+   ===================================================================== */
+.navbar,.hoya-nav{
+  background-color:#fff !important;
+  background-image:none !important;
+  border-bottom:1px solid var(--hl-line);
+  box-shadow:0 1px 3px rgba(20,25,40,.06);
+}
+/* "Log out" button — was a white outline (invisible on white) */
+.navbar .btn-outline-light{
+  color:var(--hl-ink) !important;
+  border-color:var(--hl-line) !important;
+}
+.navbar .btn-outline-light:hover,.navbar .btn-outline-light:focus{
+  background-color:var(--hl-orange) !important;
+  border-color:var(--hl-orange) !important;
+  color:#fff !important;
+}
+/* links in the bar become dark, orange on hover / when active */
+.navbar .navbar-nav .nav-link,
+.navbar .navbar-nav .dropdown-toggle,
+.navbar .navbar-text,
+.navbar-dark .navbar-nav .nav-link{
+  color:var(--hl-ink) !important;
+  font-weight:500;
+}
+.navbar .navbar-nav .nav-link:hover,
+.navbar .navbar-nav .nav-link:focus,
+.navbar .navbar-nav .nav-link.active,
+.navbar .navbar-nav .show > .nav-link{
+  color:var(--hl-orange) !important;
+}
+/* the "Admin · Admin" text */
+.navbar .navbar-text,.navbar .text-white,.navbar .text-light{
+  color:var(--hl-muted) !important;
+}
+/* hamburger (narrow screens) */
+.navbar-dark .navbar-toggler,.navbar .navbar-toggler{
+  border-color:var(--hl-line);
+}
+.navbar-dark .navbar-toggler-icon,.navbar .navbar-toggler-icon{
+  background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='%231E2330' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+/* dropdown panels */
+.navbar .dropdown-menu{
+  border:1px solid var(--hl-line);
+  box-shadow:0 6px 20px rgba(20,25,40,.12);
+}
+.navbar .dropdown-item.active,.navbar .dropdown-item:active{
+  background-color:var(--hl-orange);
+}
+
+/* =====================================================================
+   2. LOGO  —  replace the "🚚 Hoya" text with the Heliolink logo
+   The logo image already lives at /static/logo-orange.png
+   (Deletes the text/emoji visually and shows the image instead.)
+   ===================================================================== */
+.navbar .navbar-brand{
+  font-size:0 !important;         /* hides the "Hoya" text + truck emoji */
+  line-height:0;
+  width:148px;
+  height:36px;
+  padding-top:0;
+  padding-bottom:0;
+  background:url('/static/logo-orange.png') left center / contain no-repeat;
+}
+
+/* =====================================================================
+   3. BUTTONS & ACCENTS  —  Bootstrap blue  ->  Heliolink orange
+   ===================================================================== */
+.btn-primary{
+  background-color:var(--hl-orange) !important;
+  border-color:var(--hl-orange) !important;
+  color:#fff !important;
+}
+.btn-primary:hover,.btn-primary:focus,.btn-primary:active,
+.btn-primary:not(:disabled):not(.disabled):active,
+.show > .btn-primary.dropdown-toggle{
+  background-color:var(--hl-orange-dark) !important;
+  border-color:var(--hl-orange-dark) !important;
+}
+.btn-outline-primary{
+  color:var(--hl-orange) !important;
+  border-color:var(--hl-orange) !important;
+}
+.btn-outline-primary:hover,.btn-outline-primary:focus,.btn-outline-primary:active{
+  background-color:var(--hl-orange) !important;
+  border-color:var(--hl-orange) !important;
+  color:#fff !important;
+}
+.btn-link{color:var(--hl-orange) !important;}
+
+/* utility colour classes */
+.bg-primary{background-color:var(--hl-orange) !important;}
+.text-primary{color:var(--hl-orange) !important;}
+.border-primary{border-color:var(--hl-orange) !important;}
+.badge.bg-primary{background-color:var(--hl-orange) !important;}
+
+/* in-table action links (View, Edit) — keep them a calm, readable blue */
+table a:not(.btn),.card a:not(.btn):not(.navbar-brand){
+  color:var(--hl-blue);
+}
+
+/* =====================================================================
+   4. FORM FOCUS  —  orange focus ring instead of blue
+   ===================================================================== */
+.form-control:focus,.form-select:focus,.form-check-input:focus{
+  border-color:var(--hl-orange);
+  box-shadow:0 0 0 .2rem rgba(255,106,6,.20);
+}
+.form-check-input:checked{
+  background-color:var(--hl-orange);
+  border-color:var(--hl-orange);
+}
+a{text-decoration-color:rgba(255,106,6,.35);}
+
+/* =====================================================================
+   5. CARDS / TABLES  —  small polish to match the design
+   ===================================================================== */
+.card{
+  border:1px solid var(--hl-line);
+  border-radius:10px;
+  box-shadow:0 1px 3px rgba(20,25,40,.08);
+}
+.table > :not(caption) > * > *{border-color:var(--hl-line);}
+.table thead th{
+  color:var(--hl-muted);
+  font-weight:600;
+  text-transform:none;
+}
+
+/* =====================================================================
+   6. DARK MODE  (OPTIONAL)
+   ---------------------------------------------------------------------
+   Applies the brand navy automatically when the user's device is set
+   to dark mode. If you DON'T want automatic dark mode, delete this
+   whole block (everything between the @media line and its closing }).
+   ===================================================================== */
+@media (prefers-color-scheme: dark){
+  body{background-color:var(--hl-navy) !important;color:#F2F3F5 !important;}
+
+  /* top bar goes navy, logo stays the orange one */
+  .navbar,.hoya-nav{background-color:#1E2330 !important;background-image:none !important;border-bottom-color:#333A4C !important;}
+  .navbar .btn-outline-light{color:#F2F3F5 !important;border-color:#333A4C !important;}
+  .navbar .navbar-nav .nav-link,
+  .navbar .navbar-nav .dropdown-toggle,
+  .navbar-dark .navbar-nav .nav-link{color:#F2F3F5 !important;}
+  .navbar .navbar-nav .nav-link:hover,
+  .navbar .navbar-nav .nav-link.active{color:var(--hl-orange) !important;}
+  .navbar .navbar-text,.navbar .text-white{color:#AEB4C2 !important;}
+  .navbar .dropdown-menu{background-color:#1E2330;border-color:#333A4C;}
+  .navbar .dropdown-item{color:#F2F3F5;}
+  .navbar .dropdown-item:hover{background-color:#252B3B;}
+
+  /* surfaces */
+  .card,.list-group-item,.modal-content,.dropdown-menu{
+    background-color:#1E2330 !important;border-color:#333A4C !important;color:#F2F3F5 !important;}
+  .table{color:#F2F3F5;--bs-table-bg:transparent;}
+  .table > :not(caption) > * > *{border-color:#333A4C;background-color:transparent;}
+  .table thead th{color:#AEB4C2;}
+
+  /* inputs */
+  .form-control,.form-select{
+    background-color:#161A24;border-color:#333A4C;color:#F2F3F5;}
+  .form-control::placeholder{color:#7a8296;}
+  .form-control:focus,.form-select:focus{background-color:#161A24;color:#F2F3F5;}
+
+  /* keep text readable where Bootstrap forces dark text */
+  .text-dark,.text-body,.text-muted{color:#AEB4C2 !important;}
+  a{color:#FF7D2E;}
+  table a:not(.btn){color:#6fb0f0;}
+}

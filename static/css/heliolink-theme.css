@@ -164,43 +164,17 @@ a{text-decoration-color:rgba(255,106,6,.35);}
 }
 
 /* =====================================================================
-   6. DARK MODE  (OPTIONAL)
-   ---------------------------------------------------------------------
-   Applies the brand navy automatically when the user's device is set
-   to dark mode. If you DON'T want automatic dark mode, delete this
-   whole block (everything between the @media line and its closing }).
+   6. LAYOUT  —  centre the page content with side margins
+   (the app used full-width "container-fluid"; this gives the artifact's
+   centred column. Raise/lower max-width to taste.)
    ===================================================================== */
-@media (prefers-color-scheme: dark){
-  body{background-color:var(--hl-navy) !important;color:#F2F3F5 !important;}
-
-  /* top bar goes navy, logo stays the orange one */
-  .navbar,.hoya-nav{background-color:#1E2330 !important;background-image:none !important;border-bottom-color:#333A4C !important;}
-  .navbar .btn-outline-light{color:#F2F3F5 !important;border-color:#333A4C !important;}
-  .navbar .navbar-nav .nav-link,
-  .navbar .navbar-nav .dropdown-toggle,
-  .navbar-dark .navbar-nav .nav-link{color:#F2F3F5 !important;}
-  .navbar .navbar-nav .nav-link:hover,
-  .navbar .navbar-nav .nav-link.active{color:var(--hl-orange) !important;}
-  .navbar .navbar-text,.navbar .text-white{color:#AEB4C2 !important;}
-  .navbar .dropdown-menu{background-color:#1E2330;border-color:#333A4C;}
-  .navbar .dropdown-item{color:#F2F3F5;}
-  .navbar .dropdown-item:hover{background-color:#252B3B;}
-
-  /* surfaces */
-  .card,.list-group-item,.modal-content,.dropdown-menu{
-    background-color:#1E2330 !important;border-color:#333A4C !important;color:#F2F3F5 !important;}
-  .table{color:#F2F3F5;--bs-table-bg:transparent;}
-  .table > :not(caption) > * > *{border-color:#333A4C;background-color:transparent;}
-  .table thead th{color:#AEB4C2;}
-
-  /* inputs */
-  .form-control,.form-select{
-    background-color:#161A24;border-color:#333A4C;color:#F2F3F5;}
-  .form-control::placeholder{color:#7a8296;}
-  .form-control:focus,.form-select:focus{background-color:#161A24;color:#F2F3F5;}
-
-  /* keep text readable where Bootstrap forces dark text */
-  .text-dark,.text-body,.text-muted{color:#AEB4C2 !important;}
-  a{color:#FF7D2E;}
-  table a:not(.btn){color:#6fb0f0;}
+main.container-fluid{
+  max-width:1280px;
+  margin-left:auto;
+  margin-right:auto;
+}
+.navbar > .container-fluid{
+  max-width:1280px;
+  margin-left:auto;
+  margin-right:auto;
 }

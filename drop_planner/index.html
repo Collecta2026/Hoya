@@ -1,0 +1,1421 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Heliolink Drop Planner</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: phone-first single column; on wide screens drops + vehicle inputs sit left, route, costing and run sheet right; fleet and fuel log span the foot. Stop numbers borrow UK primary-route signage (green plate, yellow figures). */
+:root {
+  --bg: #edf1ee;
+  --surface: #ffffff;
+  --surface-2: #f5f8f6;
+  --ink: #15201b;
+  --muted: #56655e;
+  --line: #d3dcd6;
+  --sign: #00703c;
+  --sign-ink: #ffd200;
+  --depot: #1d4f9c;
+  --gbtn: #1d4f9c;
+  --route: #00703c;
+  --btn-ink: #ffffff;
+  --warn: #8a5200;
+  --warn-bg: #fff2d8;
+  --bad: #ad2a1f;
+  --bad-bg: #fde9e6;
+  --focus: #1d4f9c;
+  --f-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 10px;
+  /* QR tiles stay dark-on-white in both themes so phone cameras can read them */
+  --qr-bg: #ffffff;
+  --qr-fg: #111814;
+  --qr-ink: #33413a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1412; --surface: #161e1b; --surface-2: #1c2622; --ink: #e3ebe6; --muted: #93a49c; --line: #2a3631;
+    --sign: #0d7a44; --sign-ink: #ffd200; --depot: #5a8fde; --gbtn: #2c5fae; --route: #40b27b; --btn-ink: #ffffff;
+    --warn: #f0b456; --warn-bg: #2c2314; --bad: #f2877e; --bad-bg: #321c1a; --focus: #7aa8ef;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1412; --surface: #161e1b; --surface-2: #1c2622; --ink: #e3ebe6; --muted: #93a49c; --line: #2a3631;
+  --sign: #0d7a44; --sign-ink: #ffd200; --depot: #5a8fde; --gbtn: #2c5fae; --route: #40b27b; --btn-ink: #ffffff;
+  --warn: #f0b456; --warn-bg: #2c2314; --bad: #f2877e; --bad-bg: #321c1a; --focus: #7aa8ef;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--f-body); font-size: 15px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 1180px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 18px 40px;
+  display: grid; gap: 18px;
+}
+header.top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.eyebrow { font-size: 11.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--f-display); font-weight: 700; font-size: 34px; line-height: 1; margin: 4px 0 0; letter-spacing: .01em; text-wrap: balance; }
+h2 { font-family: var(--f-display); font-weight: 600; font-size: 21px; line-height: 1.1; margin: 0; letter-spacing: .02em; text-wrap: balance; }
+h3 { font-size: 11.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
+.depot-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.depot-chip b { font-family: var(--f-mono); font-weight: 600; color: var(--ink); }
+.dsq { width: 20px; height: 20px; border-radius: 4px; background: var(--gbtn); color: #fff; display: grid; place-items: center; font-family: var(--f-display); font-weight: 700; font-size: 13px; }
+
+.grid { display: grid; gap: 18px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 920px) { .grid { grid-template-columns: minmax(330px, 400px) minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.col { display: grid; gap: 18px; min-width: 0; }
+.phead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px 14px; flex-wrap: wrap; }
+
+label.fl { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+.inp, textarea, select.inp {
+  width: 100%; font: inherit; color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; min-width: 0;
+}
+.inp.pc { font-family: var(--f-mono); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+.inp.num { font-variant-numeric: tabular-nums; }
+.inp[disabled], select.inp[disabled] { opacity: .6; }
+textarea { font-family: var(--f-mono); font-size: 14px; line-height: 1.55; min-height: 210px; resize: vertical; padding: 10px 12px; }
+.inp:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible, .switch input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+.start-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; }
+.start-meta, .src { font-size: 12.5px; color: var(--muted); }
+.src.warn { color: var(--warn); }
+.src.bad { color: var(--bad); }
+.ta-foot { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--depot); font-weight: 500; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-align: left; }
+.two { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; }
+.unit { position: relative; }
+.unit .inp { padding-right: 46px; }
+.unit span { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); font-size: 12.5px; color: var(--muted); pointer-events: none; }
+.unit.pre .inp { padding-left: 24px; padding-right: 11px; }
+.unit.pre span { left: 11px; right: auto; }
+
+.switch { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch span.track { width: 40px; height: 24px; border-radius: 999px; background: var(--line); position: relative; flex: none; transition: background .15s; }
+.switch span.track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.switch input:checked + span.track { background: var(--sign); }
+.switch input:checked + span.track::after { transform: translateX(16px); }
+
+details.assume { border-top: 1px solid var(--line); padding-top: 12px; }
+details.assume summary { cursor: pointer; font-weight: 600; font-size: 14px; list-style: none; display: flex; justify-content: space-between; gap: 8px; }
+details.assume summary::-webkit-details-marker { display: none; }
+details.assume summary::after { content: "Show"; font-weight: 500; font-size: 13px; color: var(--depot); text-decoration: underline; text-underline-offset: 2px; }
+details.assume[open] summary::after { content: "Hide"; }
+.assume-body { display: grid; gap: 12px; margin-top: 12px; }
+.bands { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bands th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; padding: 0 6px 6px 0; }
+.bands td { padding: 3px 6px 3px 0; }
+.bands td:first-child { white-space: nowrap; }
+.bands .inp { padding: 6px 8px; font-size: 14px; }
+.inline-rule { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; }
+.inline-rule .inp { width: 70px; padding: 6px 8px; }
+
+.btn { appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; font-size: 14px; border-radius: 8px; padding: 9px 13px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; line-height: 1.2; }
+.btn:hover { background: var(--surface-2); }
+.btn[disabled] { opacity: .55; cursor: not-allowed; }
+.btn.primary { background: var(--sign); border-color: var(--sign); color: var(--btn-ink); font-size: 16px; padding: 13px 16px; width: 100%; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn.primary[disabled] { opacity: .65; cursor: progress; }
+.btn.solid { background: var(--sign); border-color: var(--sign); color: var(--btn-ink); }
+.btn.gmaps { background: var(--gbtn); border-color: var(--gbtn); color: #fff; }
+.btn.gmaps:hover { filter: brightness(1.08); }
+.btn.sm { font-size: 13px; padding: 6px 10px; }
+.btn.danger { color: var(--bad); }
+.btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 12px 18px; }
+.stat { display: grid; align-content: start; min-width: 0; }
+.stat .v { font-family: var(--f-display); font-weight: 700; font-size: 28px; line-height: 1.05; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stat .v small { font-size: 17px; font-weight: 600; margin-left: 1px; }
+.stat .k { font-size: 12px; color: var(--muted); letter-spacing: .02em; }
+.stat.dim .v { color: var(--muted); }
+.example-flag { font-size: 12.5px; background: var(--warn-bg); color: var(--warn); padding: 4px 9px; border-radius: 6px; font-weight: 500; justify-self: start; }
+
+.mapbox { border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); overflow: hidden; }
+.mapbox svg { display: block; width: 100%; height: auto; }
+.m-grid { stroke: var(--line); stroke-width: 1; }
+.m-route { fill: none; stroke: var(--route); stroke-width: 2.6; stroke-linejoin: round; stroke-linecap: round; }
+.m-return { fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-dasharray: 5 5; }
+.m-stop { fill: var(--sign); stroke: var(--surface-2); stroke-width: 2; }
+.m-num { fill: var(--sign-ink); font-family: var(--f-display); font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.m-depot { fill: var(--gbtn); stroke: var(--surface-2); stroke-width: 2; }
+.m-dtext { fill: #fff; font-family: var(--f-display); font-weight: 700; text-anchor: middle; dominant-baseline: central; font-size: 12px; }
+.m-scale { stroke: var(--ink); stroke-width: 1.5; fill: none; }
+.m-stext { fill: var(--ink); font-size: 11px; font-family: var(--f-body); }
+
+.cost-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px 22px; }
+.cb { min-width: 0; }
+.row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 5px 0; border-top: 1px dashed var(--line); font-size: 14px; }
+.row > span:first-child { color: var(--muted); }
+.row > span:last-child { font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.row.total { border-top: 1px solid var(--ink); font-weight: 600; }
+.row.total > span:first-child { color: var(--ink); }
+.row.total > span:last-child { font-family: var(--f-display); font-size: 20px; font-weight: 700; line-height: 1.1; }
+.tag { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: 1px; letter-spacing: .03em; white-space: nowrap; }
+.tag.approx, .tag.est { background: var(--warn-bg); color: var(--warn); }
+.tag.gm { background: var(--surface-2); color: var(--depot); border: 1px solid var(--line); }
+.tag.multi { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.override { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 10px; }
+.override .inp { background: var(--surface); }
+
+.issues { display: grid; gap: 6px; }
+.issue { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 10px; padding: 8px 10px; border-radius: 8px; font-size: 13.5px; align-items: baseline; }
+.issue.bad { background: var(--bad-bg); color: var(--bad); }
+.issue.warn { background: var(--warn-bg); color: var(--warn); }
+.issue code { font-family: var(--f-mono); font-weight: 600; overflow-wrap: anywhere; }
+
+.legs { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.leg { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; background: var(--surface-2); }
+.leg .lt { font-weight: 600; }
+.leg .ls { font-size: 12.5px; color: var(--muted); font-family: var(--f-mono); overflow-wrap: anywhere; }
+.leg .lm { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.leg .btnrow .btn { flex: 1 1 0; }
+.qrbox { background: var(--qr-bg); border-radius: 8px; padding: 10px; display: grid; gap: 6px; justify-items: center; }
+.qrbox svg { display: block; width: 100%; max-width: 220px; height: auto; }
+.qrbox span { font-size: 12px; color: var(--qr-ink); text-align: center; }
+
+ol.stops { list-style: none; margin: 0; padding: 0; display: grid; }
+ol.stops li { display: grid; grid-template-columns: 44px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+ol.stops li:first-child { border-top: 0; }
+ol.stops li.brk { padding: 6px 0; color: var(--muted); font-size: 13px; }
+.plate { height: 30px; min-width: 38px; padding: 0 6px; border-radius: 5px; background: var(--sign); color: var(--sign-ink); display: grid; place-items: center; font-family: var(--f-display); font-weight: 700; font-size: 19px; font-variant-numeric: tabular-nums; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.55); }
+.plate.depot { background: var(--gbtn); color: #fff; font-size: 15px; }
+.plate.pause { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line); color: var(--muted); font-size: 12px; letter-spacing: .04em; height: 24px; }
+.pc { font-family: var(--f-mono); font-weight: 600; font-size: 15px; letter-spacing: .02em; }
+.who { font-size: 13.5px; overflow-wrap: anywhere; }
+.where { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.dist { text-align: right; display: grid; gap: 3px; justify-items: end; }
+.eta { font-family: var(--f-display); font-weight: 700; font-size: 19px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dist .mi { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.go { font-size: 12.5px; font-weight: 600; color: var(--depot); text-decoration: none; white-space: nowrap; }
+.go:hover { text-decoration: underline; }
+
+.fleet-grid { display: grid; gap: 22px; grid-template-columns: 1fr; }
+@media (min-width: 900px) { .fleet-grid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); } }
+.fleet-col { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.pill { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.pill.ok { color: var(--route); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+.tblwrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tbl th { text-align: left; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; }
+.tbl td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tbl .act { text-align: right; white-space: nowrap; }
+.tbl .act .btn + .btn { margin-left: 4px; }
+.tbl .reg { font-family: var(--f-mono); font-size: 12.5px; color: var(--muted); }
+.tbl .empty-row td { color: var(--muted); padding: 14px 10px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; align-items: end; }
+.form-grid .wide { grid-column: 1 / -1; }
+.ferr { font-size: 13px; color: var(--bad); min-height: 0; }
+
+.copyout { width: 100%; min-height: 120px; font-family: var(--f-mono); font-size: 12.5px; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 8px; font-size: 14px; font-weight: 500; z-index: 20; box-shadow: 0 6px 20px rgba(0,0,0,.2); max-width: calc(100vw - 32px); }
+.empty { color: var(--muted); font-size: 14px; padding: 18px 4px; }
+footer { font-size: 12px; color: var(--muted); max-width: 80ch; line-height: 1.55; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Heliolink · Multi-drop</div>
+      <h1>Drop Planner</h1>
+    </div>
+    <div class="depot-chip"><span class="dsq" aria-hidden="true">D</span>Starting from <b id="chipPc">PR2 2TE</b></div>
+  </header>
+
+  <div class="grid">
+    <section class="col" aria-label="Plan a run">
+      <div class="panel">
+        <div>
+          <label class="fl" for="startPc">Start point</label>
+          <div class="start-row">
+            <input class="inp pc" type="text" id="startPc" value="PR2 2TE" autocomplete="off" spellcheck="false" aria-describedby="startMeta">
+            <button type="button" class="btn sm" id="resetStart">Depot</button>
+          </div>
+          <div class="start-meta" id="startMeta">Heliolink depot, Leeward Road, Ashton-on-Ribble</div>
+        </div>
+
+        <div>
+          <label class="fl" for="drops">Drops</label>
+          <textarea id="drops" spellcheck="false" autocomplete="off" placeholder="One per line. A customer name can go before or after the postcode, e.g.&#10;Williams Handbaked, PR1 4XX&#10;BB2 1DQ&#10;FY1 4BQ Kings Café"></textarea>
+          <div class="ta-foot"><span id="parseCount">0 postcodes</span><span><button type="button" class="linkbtn" id="loadExample">Load example</button> · <button type="button" class="linkbtn" id="clearDrops">Clear</button></span></div>
+        </div>
+
+        <label class="switch" for="returnDepot">
+          <input type="checkbox" id="returnDepot">
+          <span class="track" aria-hidden="true"></span>
+          <span>Return to start at the end</span>
+        </label>
+
+        <button type="button" class="btn primary" id="planBtn">Plan route</button>
+        <p class="hint">Starts with the drop nearest the start point, then reshuffles the order to cut out back-tracking. Duplicates are merged into one stop.</p>
+      </div>
+
+      <div class="panel" aria-label="Vehicle and costs">
+        <h2>Vehicle and fuel</h2>
+        <div class="two">
+          <div>
+            <label class="fl" for="runDate">Run date</label>
+            <input class="inp num" type="date" id="runDate">
+          </div>
+          <div>
+            <label class="fl" for="startTime">Leave depot</label>
+            <input class="inp num" type="time" id="startTime" value="08:00">
+          </div>
+        </div>
+
+        <div>
+          <label class="fl" for="vehicle">Vehicle</label>
+          <select class="inp" id="vehicle"><option value="">Loading fleet…</option></select>
+          <div class="src" id="vehicleMeta">Loading your fleet list…</div>
+        </div>
+
+        <div class="two" id="customVehicle" hidden>
+          <div>
+            <label class="fl" for="customMpg">Fuel economy</label>
+            <div class="unit"><input class="inp num" type="number" id="customMpg" min="1" max="99" step="0.1" inputmode="decimal" placeholder="e.g. 30"><span>MPG</span></div>
+          </div>
+          <div>
+            <label class="fl" for="customFuel">Fuel</label>
+            <select class="inp" id="customFuel"><option>Diesel</option><option>Petrol</option></select>
+          </div>
+        </div>
+
+        <div>
+          <label class="fl" for="fuelPrice"><span id="priceLabel">Diesel</span> price on the run date</label>
+          <div class="unit"><input class="inp num" type="number" id="fuelPrice" min="0.5" max="5" step="0.0001" inputmode="decimal" placeholder="e.g. 1.5922"><span>£/litre</span></div>
+          <div class="src" id="priceSrc">Checking the fuel price log…</div>
+          <button type="button" class="linkbtn" id="savePriceBtn" hidden></button>
+        </div>
+
+        <details class="assume" id="assume">
+          <summary>Time and road allowances</summary>
+          <div class="assume-body">
+            <p class="hint">Road miles and driving time are estimated from the straight-line distance of each leg. Enter the Google Maps totals under Run costing to replace them.</p>
+            <div style="overflow-x:auto">
+              <table class="bands">
+                <thead><tr><th>Leg (straight line)</th><th>Road miles per mile</th><th>Average mph</th></tr></thead>
+                <tbody>
+                  <tr><td>Under 3 mi</td><td><input class="inp num" type="number" id="b0f" min="1" max="3" step="0.05" aria-label="Road miles per straight mile, legs under 3 miles"></td><td><input class="inp num" type="number" id="b0m" min="5" max="70" step="1" aria-label="Average mph, legs under 3 miles"></td></tr>
+                  <tr><td>3 to 15 mi</td><td><input class="inp num" type="number" id="b1f" min="1" max="3" step="0.05" aria-label="Road miles per straight mile, legs 3 to 15 miles"></td><td><input class="inp num" type="number" id="b1m" min="5" max="70" step="1" aria-label="Average mph, legs 3 to 15 miles"></td></tr>
+                  <tr><td>Over 15 mi</td><td><input class="inp num" type="number" id="b2f" min="1" max="3" step="0.05" aria-label="Road miles per straight mile, legs over 15 miles"></td><td><input class="inp num" type="number" id="b2m" min="5" max="70" step="1" aria-label="Average mph, legs over 15 miles"></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="inline-rule"><label for="dropMins">Time at each drop</label><input class="inp num" type="number" id="dropMins" min="0" max="120" step="1"><span>min</span></div>
+            <div class="inline-rule"><label for="breakMins">Add a</label><input class="inp num" type="number" id="breakMins" min="0" max="120" step="5"><span>min break when the run is over</span><input class="inp num" type="number" id="breakAfter" min="1" max="15" step="0.5" aria-label="Hours before a break is added"><span>hours</span></div>
+            <div class="inline-rule"><label for="driverRate">Driver cost</label><span>£</span><input class="inp num" type="number" id="driverRate" min="0" max="200" step="0.25"><span>per hour</span></div>
+            <div class="src" id="assumeSrc"></div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="col" aria-live="polite" id="results">
+      <div class="panel"><div class="empty">Add some postcodes and press Plan route.</div></div>
+    </section>
+  </div>
+
+  <section class="panel" id="fleetPanel" aria-label="Fleet and fuel prices">
+    <div class="phead"><h2>Fleet and fuel prices</h2><span class="pill" id="syncPill">Loading…</span></div>
+    <div class="fleet-grid">
+      <div class="fleet-col">
+        <h3>Vehicles</h3>
+        <div class="tblwrap">
+          <table class="tbl">
+            <thead><tr><th>Vehicle</th><th>Type</th><th>Fuel</th><th class="num">MPG</th><th class="num">L/100 km</th><th class="act"><span class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Actions</span></th></tr></thead>
+            <tbody id="fleetBody"><tr class="empty-row"><td colspan="6">Loading vehicles…</td></tr></tbody>
+          </table>
+        </div>
+        <form id="vForm" class="form-grid" autocomplete="off" novalidate>
+          <div><label class="fl" for="vName">Name</label><input class="inp" id="vName" type="text" maxlength="60" placeholder="e.g. Transit 1"></div>
+          <div><label class="fl" for="vReg">Registration</label><input class="inp pc" id="vReg" type="text" maxlength="12" placeholder="PN72 ABC"></div>
+          <div><label class="fl" for="vKind">Type</label><select class="inp" id="vKind"></select></div>
+          <div><label class="fl" for="vFuel">Fuel</label><select class="inp" id="vFuel"><option>Diesel</option><option>Petrol</option></select></div>
+          <div><label class="fl" for="vMpg">MPG</label><input class="inp num" id="vMpg" type="number" min="1" max="99" step="0.1" inputmode="decimal" placeholder="e.g. 32"></div>
+          <div class="btnrow"><button type="submit" class="btn solid" id="vSave">Add vehicle</button><button type="button" class="btn" id="vCancel" hidden>Cancel</button></div>
+          <div class="ferr wide" id="vErr" role="alert"></div>
+        </form>
+      </div>
+      <div class="fleet-col">
+        <h3>Fuel price log</h3>
+        <div class="tblwrap">
+          <table class="tbl">
+            <thead><tr><th>Date</th><th>Fuel</th><th class="num">£/litre</th><th>Note</th><th class="act"><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Actions</span></th></tr></thead>
+            <tbody id="priceBody"><tr class="empty-row"><td colspan="5">Loading prices…</td></tr></tbody>
+          </table>
+        </div>
+        <button type="button" class="linkbtn" id="pMore" hidden></button>
+        <form id="pForm" class="form-grid" autocomplete="off" novalidate>
+          <div><label class="fl" for="pDate">Date</label><input class="inp num" id="pDate" type="date"></div>
+          <div><label class="fl" for="pFuel">Fuel</label><select class="inp" id="pFuel"><option>Diesel</option><option>Petrol</option></select></div>
+          <div><label class="fl" for="pPpl">£ per litre</label><input class="inp num" id="pPpl" type="number" min="0.5" max="5" step="0.0001" inputmode="decimal" placeholder="1.5922"></div>
+          <div><label class="fl" for="pNote">Note</label><input class="inp" id="pNote" type="text" maxlength="80" placeholder="e.g. Fuel card"></div>
+          <div class="btnrow"><button type="submit" class="btn solid" id="pSave">Log price</button></div>
+          <div class="ferr wide" id="pErr" role="alert"></div>
+        </form>
+        <p class="hint">Each run uses the latest price logged on or before its run date. Logging a second price for the same date and fuel replaces the first.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Postcode locations from the ONS Postcode Directory (February 2026), covering England, Scotland and Wales; Northern Ireland, Channel Islands and Isle of Man postcodes aren't included. Contains OS data © Crown copyright and database right 2026. Contains Royal Mail data © Royal Mail copyright and database right 2026. Source: Office for National Statistics, licensed under the Open Government Licence v3.0. Route order uses straight-line distance. Road miles, times and fuel are estimates until you enter the Google Maps figures. Fuel uses UK gallons (4.546 litres).
+  </footer>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- reference data ---------- */
+  const DEPOT_PC = "PR2 2TE";
+  const AREAS = new Set("AB AL B BA BB BD BH BL BN BR BS CA CB CF CH CM CO CR CT CV CW DA DD DE DG DH DL DN DT DY E EC EH EN EX FK FY G GL GU HA HD HG HP HR HS HU HX IG IP IV KA KT KW KY L LA LD LE LL LN LS LU M ME MK ML N NE NG NN NP NR NW OL OX PA PE PH PL PO PR RG RH RM S SA SE SG SK SL SM SN SO SP SR SS ST SW SY TA TD TF TN TQ TR TS TW UB W WA WC WD WF WN WR WS WV YO ZE".split(" "));
+  // Pre-resolved locations so the example route draws instantly (same values as the postcode files).
+  const SEED = {
+    "PR2 2TE": [53.7621, -2.7505, "Chain Caul Way", "Preston"],
+    "PR1 3LS": [53.7573, -2.6985, "Glover's Court", "Preston"],
+    "PR5 6FS": [53.7257, -2.6642, "Old Hall Close", "Bamber Bridge"],
+    "PR7 1PA": [53.6507, -2.6681, "German Lane", "Chorley"],
+    "PR25 2EE": [53.6915, -2.6918, "Balcarres Road", "Leyland"],
+    "BB2 1DQ": [53.7509, -2.4904, "Montague Street", "Blackburn"],
+    "BB1 5QX": [53.7692, -2.4619, "Cunliffe Close", "Blackburn"],
+    "FY1 4BQ": [53.8156, -3.0399, "Read's Avenue", "Blackpool"],
+    "FY4 2JD": [53.7854, -3.0459, "Mayfield Avenue", "Blackpool"],
+    "LA1 1RB": [54.0534, -2.8051, "Duke Street", "Lancaster"],
+    "WN1 1BT": [53.5441, -2.6302, "King Street", "Wigan"],
+    "PR4 6JG": [53.6944, -2.8456, "Carr Heyes Drive", "Becconsall"],
+    "PR3 1AZ": [53.8876, -2.7656, "Garstang Road", "Bowgreave"],
+    "BL6 4BD": [53.5833, -2.5225, "Alexandra Road", "Horwich"],
+    "L39 2XH": [53.5681, -2.8748, "Derby Hill Road", "Ormskirk"]
+  };
+  const EXAMPLE = Object.keys(SEED).filter(k => k !== DEPOT_PC).join("\n");
+  const MAX_STOPS = 300;
+  const DRAFT_KEY = "heliolink.dropPlanner.v1";
+  const LOCAL_DATA_KEY = "heliolink.dropPlanner.data.v1";
+  const L_PER_GAL = 4.54609;
+  const FUELS = ["Diesel", "Petrol"];
+  const KINDS = ["Small van", "Panel van", "LWB panel van", "Luton van", "3.5t dropside", "7.5t rigid", "12t+ rigid", "Artic", "Car"];
+  const DEFAULT_SETTINGS = { bands: [{ factor: 1.4, mph: 18 }, { factor: 1.3, mph: 30 }, { factor: 1.2, mph: 45 }], dropMins: 5, breakMins: 30, breakAfterH: 6, driverRate: 12 };
+
+  /* ---------- helpers ---------- */
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const pad2 = n => String(n).padStart(2, "0");
+  const fmtMi = m => (m < 10 ? m.toFixed(1) : Math.round(m).toLocaleString("en-GB"));
+  const GBP = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
+  const money = v => GBP.format(v);
+  const fmtPpl = p => "£" + p.toFixed(4).replace(/(\.\d{2}\d*?)0+$/, "$1");
+  const fmtL = l => (l < 100 ? l.toFixed(1) : Math.round(l).toLocaleString("en-GB"));
+  function fmtDur(h) { const m = Math.round(h * 60); const hh = Math.floor(m / 60), mm = m % 60; return hh ? hh + " h " + pad2(mm) + " min" : mm + " min"; }
+  function fmtClock(min) { const r = Math.round(min); const mm = ((r % 1440) + 1440) % 1440; return pad2(Math.floor(mm / 60)) + ":" + pad2(mm % 60) + (r >= 1440 ? " +1d" : ""); }
+  function todayISO() { const d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function isoParts(iso) { return iso.split("-").map(Number); }
+  function fmtDate(iso) { const [y, m, d] = isoParts(iso); return new Date(y, m - 1, d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); }
+  function daysBetween(a, b) { const [y1, m1, d1] = isoParts(a), [y2, m2, d2] = isoParts(b); return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000); }
+  function parseClock(s) { const m = String(s || "").match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+  function parseDuration(s) {
+    s = String(s || "").trim().toLowerCase();
+    if (!s) return null;
+    let m;
+    if ((m = s.match(/^(\d{1,2}):(\d{1,2})$/))) return +m[1] + (+m[2]) / 60;
+    if ((m = s.match(/^(\d{1,2})\s*h(?:ours?|rs?)?\s*(?:(\d{1,2})\s*(?:m|mins?|minutes?)?)?$/))) return +m[1] + (m[2] ? +m[2] / 60 : 0);
+    if ((m = s.match(/^(\d{1,4})\s*(?:m|mins?|minutes?)$/))) return +m[1] / 60;
+    if ((m = s.match(/^\d+(?:\.\d+)?$/))) return parseFloat(s);
+    return null;
+  }
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } }
+  let toastTimer;
+  function toast(msg) {
+    const t = $("toast"); t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  }
+
+  /* ---------- postcode parsing ---------- */
+  const PC_RE = /\b([A-Z]{1,2}[0-9][A-Z0-9]?)\s*([0-9][A-Z]{2})\b/g;
+  function normPc(s) {
+    const m = String(s).toUpperCase().replace(/\s+/g, "").match(/^([A-Z]{1,2}[0-9][A-Z0-9]?)([0-9][A-Z]{2})$/);
+    return m ? m[1] + " " + m[2] : null;
+  }
+  function parseDrops(text) {
+    const entries = [], unread = [];
+    text.replace(/ /g, " ").split(/\r?\n/).forEach(line => {
+      const raw = line.trim();
+      if (!raw) return;
+      const up = raw.toUpperCase();
+      const found = [];
+      let m; PC_RE.lastIndex = 0;
+      while ((m = PC_RE.exec(up))) found.push({ pc: m[1] + " " + m[2], i: m.index, len: m[0].length });
+      if (!found.length) { unread.push(raw); return; }
+      if (found.length === 1) {
+        const f = found[0];
+        const label = (raw.slice(0, f.i) + " " + raw.slice(f.i + f.len)).replace(/[\s,;:|\-–—\t]+$/g, "").replace(/^[\s,;:|\-–—\t]+/g, "").replace(/\s{2,}/g, " ").trim();
+        entries.push({ pc: f.pc, label });
+      } else {
+        found.forEach(f => entries.push({ pc: f.pc, label: "" }));
+      }
+    });
+    return { entries, unread };
+  }
+
+  /* ---------- postcode lookup (per-area files, decoded lazily) ---------- */
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const B64V = new Int16Array(128).fill(-1);
+  for (let i = 0; i < 64; i++) B64V[B64.charCodeAt(i)] = i;
+  function dec(s, i, n) { let v = 0; for (let k = 0; k < n; k++) v = v * 64 + B64V[s.charCodeAt(i + k)]; return v; }
+
+  const areaCache = new Map();
+  function loadArea(a) {
+    if (!areaCache.has(a)) {
+      const p = fetch("pc/" + a + ".json").then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .catch(() => { areaCache.delete(a); return null; });
+      areaCache.set(a, p);
+    }
+    return areaCache.get(a);
+  }
+  function sectorUnits(d, key) {
+    d._u = d._u || {};
+    if (d._u[key]) return d._u[key];
+    const [blat, blng, w, packed] = d.sectors[key];
+    const off = w === 2 ? 2048 : 131072, L = 2 + 2 * w + 3, map = new Map();
+    for (let i = 0; i < packed.length; i += L) {
+      map.set(packed.slice(i, i + 2), [
+        (blat + dec(packed, i + 2, w) - off) / 1e4,
+        (blng + dec(packed, i + 2 + w, w) - off) / 1e4,
+        dec(packed, i + 2 + 2 * w, 3)
+      ]);
+    }
+    d._u[key] = map;
+    return map;
+  }
+  async function geocode(pc) {
+    if (SEED[pc]) { const s = SEED[pc]; return { lat: s[0], lng: s[1], street: s[2], town: s[3] }; }
+    const [out, inc] = pc.split(" ");
+    const area = out.match(/^[A-Z]+/)[0];
+    if (area === "BT") return { err: "Northern Ireland postcodes aren't covered" };
+    if (area === "GY" || area === "JE" || area === "IM") return { err: "Channel Islands and Isle of Man postcodes aren't covered" };
+    if (!AREAS.has(area)) return { err: "Not a recognised UK postcode area" };
+    const d = await loadArea(area);
+    if (!d) return { err: "Couldn't load postcode data. Check your connection and plan again", retry: true };
+    const sk = out + " " + inc[0];
+    if (d.sectors[sk]) {
+      const u = sectorUnits(d, sk).get(inc.slice(1));
+      if (u) {
+        const s = u[2] ? d.streets[u[2] - 1] : null;
+        return { lat: u[0], lng: u[1], street: s ? s[0] : "", town: s ? d.towns[s[1]] : "" };
+      }
+      const sec = d.sectors[sk];
+      return { lat: sec[0] / 1e4, lng: sec[1] / 1e4, street: "", town: "", approx: "Not in the current postcode list, so it's placed at the centre of " + sk + ". Check for a typo." };
+    }
+    let sl = 0, sg = 0, n = 0;
+    for (const k in d.sectors) {
+      if (k.startsWith(out + " ")) { const s = d.sectors[k], c = s[3].length / (7 + 2 * s[2]); sl += s[0] * c; sg += s[1] * c; n += c; }
+    }
+    if (n) return { lat: sl / n / 1e4, lng: sg / n / 1e4, street: "", town: "", approx: "Sector " + sk + " doesn't exist, so it's placed at the centre of " + out + ". Check for a typo." };
+    return { err: "Postcode not found. Check for a typo" };
+  }
+
+  /* ---------- route optimisation ---------- */
+  function hav(a, b) {
+    const R = 3958.8, toR = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * toR, dLng = (b.lng - a.lng) * toR;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * toR) * Math.cos(b.lat * toR) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  // pts[0] is the start; returns an index order beginning with 0 (and ending with 0 when closed).
+  function solve(pts, closed) {
+    const N = pts.length, n = N - 1;
+    const D = new Float64Array(N * N);
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) { const v = hav(pts[i], pts[j]); D[i * N + j] = v; D[j * N + i] = v; }
+    const d = (a, b) => D[a * N + b];
+    const EPS = 1e-9, t0 = performance.now();
+    let seed = 12345;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    // Nearest-neighbour build from the start; `first` forces the opening drop, `wobble` sometimes takes the 2nd nearest.
+    function build(first, wobble) {
+      const r = [0], used = new Uint8Array(N); used[0] = 1;
+      let cur = 0;
+      if (first > 0) { r.push(first); used[first] = 1; cur = first; }
+      while (r.length < N) {
+        let b1 = -1, d1 = Infinity, b2 = -1, d2 = Infinity;
+        for (let j = 1; j < N; j++) {
+          if (used[j]) continue;
+          const v = d(cur, j);
+          if (v < d1) { b2 = b1; d2 = d1; b1 = j; d1 = v; } else if (v < d2) { b2 = j; d2 = v; }
+        }
+        const pick = wobble && b2 > 0 && rnd() < wobble ? b2 : b1;
+        r.push(pick); used[pick] = 1; cur = pick;
+      }
+      if (closed) r.push(0);
+      return r;
+    }
+    function cost(r) { let c = 0; for (let i = 1; i < r.length; i++) c += d(r[i - 1], r[i]); return c; }
+    // Improve one tour in place with 2-opt and Or-opt moves until nothing helps.
+    function improve(r) {
+    const last = () => (closed ? r.length - 2 : r.length - 1);
+    function twoOpt() {
+      let improved = false;
+      const L = last();
+      for (let i = 1; i < L; i++) {
+        for (let j = i + 1; j <= L; j++) {
+          const a = r[i - 1], b = r[i], c = r[j], e = j + 1 < r.length ? r[j + 1] : -1;
+          const delta = d(a, c) - d(a, b) + (e >= 0 ? d(b, e) - d(c, e) : 0);
+          if (delta < -EPS) {
+            for (let x = i, y = j; x < y; x++, y--) { const t = r[x]; r[x] = r[y]; r[y] = t; }
+            improved = true;
+          }
+        }
+      }
+      return improved;
+    }
+    function orOpt() {
+      let improved = false;
+      for (let len = 1; len <= 3; len++) {
+        for (let i = 1; i + len - 1 <= last(); i++) {
+          const seg = r.slice(i, i + len), s0 = seg[0], sL = seg[len - 1];
+          const prev = r[i - 1], next = i + len < r.length ? r[i + len] : -1;
+          const gain = d(prev, s0) + (next >= 0 ? d(sL, next) - d(prev, next) : 0);
+          const rest = r.slice(0, i).concat(r.slice(i + len));
+          let best = null;
+          const endK = closed ? rest.length - 2 : rest.length - 1;
+          for (let k = 0; k <= endK; k++) {
+            const x = rest[k], y = k + 1 < rest.length ? rest[k + 1] : -1;
+            const base = y >= 0 ? -d(x, y) : 0;
+            const fwd = d(x, s0) + (y >= 0 ? d(sL, y) : 0) + base;
+            const rev = d(x, sL) + (y >= 0 ? d(s0, y) : 0) + base;
+            if (fwd < gain - EPS && (!best || fwd < best.c)) best = { c: fwd, k, rev: false };
+            if (len > 1 && rev < gain - EPS && (!best || rev < best.c)) best = { c: rev, k, rev: true };
+          }
+          if (best) {
+            const ins = best.rev ? seg.slice().reverse() : seg;
+            const nr = rest.slice(0, best.k + 1).concat(ins, rest.slice(best.k + 1));
+            r.length = 0; Array.prototype.push.apply(r, nr);
+            improved = true;
+          }
+        }
+      }
+      return improved;
+    }
+    let guard = 0;
+    while (guard++ < 60 && performance.now() - t0 < 2500) {
+      const a = twoOpt(), b = orOpt();
+      if (!a && !b) break;
+    }
+    return r;
+    }
+    // Several starting tours (each of the nearest opening drops, then randomised ones); keep the shortest.
+    const nearest = Array.from({ length: n }, (_, i) => i + 1).sort((a, b) => d(0, a) - d(0, b)).slice(0, Math.min(n, 8));
+    let best = improve(build(0, 0)), bestC = cost(best);
+    const tries = [...nearest.map(f => [f, 0]), ...Array.from({ length: 24 }, () => [0, 0.25])];
+    for (const [f, wob] of tries) {
+      if (performance.now() - t0 > 1500) break;
+      const r = improve(build(f, wob)), c = cost(r);
+      if (c < bestC - EPS) { best = r; bestC = c; }
+    }
+    return best;
+  }
+
+  /* ---------- state ---------- */
+  let lastPlan = null;
+  let usingExample = false;
+  let priceTouched = false;
+  const qrOpen = new Set();
+  let currentLegs = [];
+  const draft = lsGet(DRAFT_KEY) || {};
+  const data = { mode: "loading", fleet: [], prices: [], settings: clone(DEFAULT_SETTINGS), readOnly: false, fleetLoaded: false, pricesLoaded: false };
+  let dbNs = null;
+  let pendingSelect = null;
+  const fleetPending = () => data.mode === "loading" || (data.mode === "db" && !data.fleetLoaded);
+
+  function saveDraft() {
+    lsSet(DRAFT_KEY, {
+      drops: $("drops").value, start: $("startPc").value, ret: $("returnDepot").checked,
+      startTime: $("startTime").value, vehicle: $("vehicle").value || draft.vehicle || "",
+      customMpg: $("customMpg").value, customFuel: $("customFuel").value
+    });
+  }
+  function updateCount() {
+    const { entries, unread } = parseDrops($("drops").value);
+    const n = new Set(entries.map(e => e.pc)).size;
+    $("parseCount").textContent = n + (n === 1 ? " postcode" : " postcodes") + (unread.length ? " · " + unread.length + " line" + (unread.length === 1 ? "" : "s") + " without one" : "");
+  }
+
+  /* ---------- fleet, prices and allowances: shared store with browser fallback ---------- */
+  function normVehicle(id, v) {
+    v = v || {};
+    const mpg = Number(v.mpg);
+    return { id: String(id), name: String(v.name || "Unnamed vehicle").slice(0, 60), reg: String(v.reg || "").toUpperCase().slice(0, 12), kind: String(v.kind || "").slice(0, 30), fuel: FUELS.includes(v.fuel) ? v.fuel : "Diesel", mpg: mpg > 0 && mpg < 100 ? mpg : null };
+  }
+  function normPrice(id, p) {
+    p = p || {};
+    const ppl = Number(p.ppl);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.date)) || !(ppl > 0 && ppl < 10)) return null;
+    return { id: String(id), date: String(p.date), fuel: FUELS.includes(p.fuel) ? p.fuel : "Diesel", ppl, note: String(p.note || "").slice(0, 80) };
+  }
+  function inRange(v, lo, hi, dflt) { v = Number(v); return Number.isFinite(v) && v >= lo && v <= hi ? v : dflt; }
+  function normSettings(s) {
+    const d = DEFAULT_SETTINGS; s = s || {};
+    const b = Array.isArray(s.bands) ? s.bands : [];
+    return {
+      bands: d.bands.map((x, i) => ({ factor: inRange(b[i] && b[i].factor, 1, 3, x.factor), mph: inRange(b[i] && b[i].mph, 5, 70, x.mph) })),
+      dropMins: inRange(s.dropMins, 0, 120, d.dropMins),
+      breakMins: inRange(s.breakMins, 0, 120, d.breakMins),
+      breakAfterH: inRange(s.breakAfterH, 1, 15, d.breakAfterH),
+      driverRate: inRange(s.driverRate, 0, 200, d.driverRate)
+    };
+  }
+  const byName = (a, b) => a.name.localeCompare(b.name, "en-GB", { numeric: true });
+  const newId = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const priceId = (date, fuel) => date + "_" + fuel.toLowerCase();
+
+  function loadLocal() {
+    const v = lsGet(LOCAL_DATA_KEY) || {};
+    data.fleet = (Array.isArray(v.fleet) ? v.fleet : []).map(x => normVehicle(x.id || newId("v"), x)).sort(byName);
+    data.prices = (Array.isArray(v.prices) ? v.prices : []).map(x => normPrice(x.id, x)).filter(Boolean);
+    data.settings = normSettings(v.settings);
+    data.fleetLoaded = data.pricesLoaded = true;
+  }
+  function saveLocal() { lsSet(LOCAL_DATA_KEY, { fleet: data.fleet, prices: data.prices, settings: data.settings }); }
+
+  async function initData() {
+    let ns = null;
+    try { if (window.claude && typeof window.claude.use === "function") ns = await window.claude.use("db"); } catch (e) { ns = null; }
+    if (!ns) { data.mode = "local"; loadLocal(); fillSettingsInputs(); dataChanged(); return; }
+    dbNs = ns; data.mode = "db";
+    try {
+      ns.collection("vehicles").onSnapshot(snap => {
+        data.fleet = snap.docs.map(d => normVehicle(d.id, d.data())).sort(byName);
+        data.fleetLoaded = true; dataChanged();
+      }, onDbError);
+      ns.collection("fuelPrices").onSnapshot(snap => {
+        data.prices = snap.docs.map(d => normPrice(d.id, d.data())).filter(Boolean);
+        data.pricesLoaded = true; dataChanged();
+      }, onDbError);
+      ns.doc("settings/run").onSnapshot(snap => {
+        if (settingsDirty) return;
+        data.settings = normSettings(snap.exists ? snap.data() : null);
+        fillSettingsInputs(); dataChanged();
+      }, onDbError);
+    } catch (e) { onDbError(e); }
+    try {
+      const u = await window.claude.use("user");
+      if (u && typeof u.can === "function" && (await u.can("data.write")) === false) { data.readOnly = true; dataChanged(); }
+    } catch (e) { /* not told: let a refused write decide */ }
+  }
+  function onDbError(e) {
+    data.mode = "error"; data.fleetLoaded = data.pricesLoaded = true; dataChanged();
+  }
+  async function dbWrite(fn) {
+    try { await fn(); return true; }
+    catch (e) {
+      const code = e && e.code;
+      if (code === "unavailable") {
+        await sleep(400 + Math.random() * 600);
+        try { await fn(); return true; } catch (e2) { toast("Couldn't save. Try again in a moment"); return false; }
+      }
+      if (code === "invalid_argument") { data.readOnly = true; dataChanged(); toast("You can view the fleet but not change it"); return false; }
+      if (code === "quota_exceeded") { toast("The shared list is full. Delete some old fuel prices to make room"); return false; }
+      if (code === "resource_exhausted") { toast("Too many changes at once. Wait a moment and try again"); return false; }
+      toast("Couldn't save that change"); return false;
+    }
+  }
+  const canWrite = () => (data.mode === "db" || data.mode === "local") && !data.readOnly;
+
+  async function putVehicle(v) {
+    const body = { name: v.name, reg: v.reg, kind: v.kind, fuel: v.fuel, mpg: v.mpg };
+    if (data.mode === "db") return dbWrite(() => dbNs.collection("vehicles").doc(v.id).set(body));
+    const i = data.fleet.findIndex(x => x.id === v.id);
+    if (i >= 0) data.fleet[i] = v; else data.fleet.push(v);
+    data.fleet.sort(byName); saveLocal(); dataChanged(); return true;
+  }
+  async function removeVehicle(id) {
+    if (data.mode === "db") return dbWrite(() => dbNs.collection("vehicles").doc(id).delete());
+    data.fleet = data.fleet.filter(x => x.id !== id); saveLocal(); dataChanged(); return true;
+  }
+  async function putPrice(p) {
+    const id = priceId(p.date, p.fuel), body = { date: p.date, fuel: p.fuel, ppl: p.ppl, note: p.note || "" };
+    if (data.mode === "db") return dbWrite(() => dbNs.collection("fuelPrices").doc(id).set(body));
+    data.prices = data.prices.filter(x => x.id !== id).concat([Object.assign({ id }, body)]); saveLocal(); dataChanged(); return true;
+  }
+  async function removePrice(id) {
+    if (data.mode === "db") return dbWrite(() => dbNs.collection("fuelPrices").doc(id).delete());
+    data.prices = data.prices.filter(x => x.id !== id); saveLocal(); dataChanged(); return true;
+  }
+  let settingsTimer, settingsDirty = false;
+  function queueSettingsSave() {
+    settingsDirty = true; clearTimeout(settingsTimer);
+    settingsTimer = setTimeout(async () => {
+      const s = clone(data.settings);
+      if (data.mode === "db" && !data.readOnly) await dbWrite(() => dbNs.doc("settings/run").set(s));
+      else if (data.mode === "local") saveLocal();
+      settingsDirty = false;
+    }, 900);
+  }
+
+  function dataChanged() {
+    renderFleet();
+    refreshVehicleSelect();
+    refreshPrice();
+    renderAssumeSrc();
+    updateCosting();
+  }
+
+  /* ---------- allowances inputs ---------- */
+  const SET_IDS = ["b0f", "b0m", "b1f", "b1m", "b2f", "b2m", "dropMins", "breakMins", "breakAfter", "driverRate"];
+  function fillSettingsInputs() {
+    const s = data.settings, a = document.activeElement;
+    const vals = { b0f: s.bands[0].factor, b0m: s.bands[0].mph, b1f: s.bands[1].factor, b1m: s.bands[1].mph, b2f: s.bands[2].factor, b2m: s.bands[2].mph, dropMins: s.dropMins, breakMins: s.breakMins, breakAfter: s.breakAfterH, driverRate: s.driverRate };
+    SET_IDS.forEach(id => { const el = $(id); if (el !== a) el.value = vals[id]; el.disabled = data.readOnly; });
+  }
+  function readSettingsInputs() {
+    const s = clone(data.settings), g = id => $(id).value;
+    s.bands[0] = { factor: inRange(g("b0f"), 1, 3, s.bands[0].factor), mph: inRange(g("b0m"), 5, 70, s.bands[0].mph) };
+    s.bands[1] = { factor: inRange(g("b1f"), 1, 3, s.bands[1].factor), mph: inRange(g("b1m"), 5, 70, s.bands[1].mph) };
+    s.bands[2] = { factor: inRange(g("b2f"), 1, 3, s.bands[2].factor), mph: inRange(g("b2m"), 5, 70, s.bands[2].mph) };
+    s.dropMins = inRange(g("dropMins"), 0, 120, s.dropMins);
+    s.breakMins = inRange(g("breakMins"), 0, 120, s.breakMins);
+    s.breakAfterH = inRange(g("breakAfter"), 1, 15, s.breakAfterH);
+    s.driverRate = inRange(g("driverRate"), 0, 200, s.driverRate);
+    return s;
+  }
+  function renderAssumeSrc() {
+    const el = $("assumeSrc");
+    el.textContent = data.mode === "db" ? (data.readOnly ? "Set by the planner's editors." : "Changes here are shared with everyone who uses this planner.")
+      : data.mode === "local" ? "Saved in this browser only." : "";
+  }
+
+  /* ---------- vehicle and price on the run ---------- */
+  function currentVehicle() {
+    const id = $("vehicle").value;
+    if (id === "__other") {
+      const mpg = parseFloat($("customMpg").value);
+      return { id, name: "Other vehicle", kind: "", reg: "", fuel: $("customFuel").value, mpg: mpg > 0 && mpg < 100 ? mpg : null };
+    }
+    return data.fleet.find(v => v.id === id) || null;
+  }
+  function refreshVehicleSelect() {
+    const sel = $("vehicle");
+    const ids = data.fleet.map(v => v.id);
+    let want = sel.value || draft.vehicle || "";
+    if (pendingSelect && ids.includes(pendingSelect)) { want = pendingSelect; pendingSelect = null; draft.vehicle = want; }
+    let html = "";
+    if (fleetPending()) html += '<option value="">Loading fleet…</option>';
+    data.fleet.forEach(v => { html += '<option value="' + esc(v.id) + '">' + esc(v.name) + (v.reg ? " · " + esc(v.reg) : "") + "</option>"; });
+    html += '<option value="__other">Other vehicle (enter MPG)</option>';
+    if (sel.innerHTML !== html) sel.innerHTML = html;
+    sel.value = ids.includes(want) ? want : want === "__other" ? "__other" : ids.length ? ids[0] : fleetPending() ? "" : "__other";
+    showVehicleMeta();
+  }
+  function showVehicleMeta() {
+    const v = currentVehicle(), meta = $("vehicleMeta");
+    $("customVehicle").hidden = $("vehicle").value !== "__other";
+    meta.className = "src";
+    if (fleetPending()) { meta.textContent = "Loading your fleet list…"; return; }
+    if (!v) { meta.textContent = "Pick a vehicle."; return; }
+    if (v.id === "__other") {
+      meta.textContent = data.fleet.length ? "For a hire or spare vehicle. Add regulars to the fleet list below." : "No fleet vehicles yet. Add them under Fleet and fuel prices so they're here next time.";
+      return;
+    }
+    if (!v.mpg) { meta.className = "src warn"; meta.textContent = [v.kind, v.fuel].filter(Boolean).join(" · ") + " · no MPG set. Edit the vehicle below to add it."; return; }
+    meta.textContent = [v.kind, v.fuel, v.mpg + " MPG", (282.481 / v.mpg).toFixed(1) + " L/100 km"].filter(Boolean).join(" · ");
+  }
+  function priceLookup(date, fuel) {
+    const list = data.prices.filter(p => p.fuel === fuel).sort((a, b) => a.date.localeCompare(b.date));
+    let on = null;
+    for (const p of list) if (p.date <= date) on = p;
+    if (on) return { p: on, exact: on.date === date, age: daysBetween(on.date, date) };
+    if (list.length) return { p: list[0], future: true };
+    return null;
+  }
+  function runDate() { const v = $("runDate").value; return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : todayISO(); }
+  function refreshPrice() {
+    const v = currentVehicle(), fuel = v ? v.fuel : "Diesel", date = runDate();
+    $("priceLabel").textContent = fuel;
+    const L = priceLookup(date, fuel);
+    const inp = $("fuelPrice"), src = $("priceSrc"), btn = $("savePriceBtn");
+    if (!priceTouched && document.activeElement !== inp) inp.value = L ? String(+L.p.ppl.toFixed(4)) : "";
+    const val = parseFloat(inp.value);
+    src.className = "src"; btn.hidden = true;
+    if (data.mode === "loading" || (data.mode === "db" && !data.pricesLoaded)) { src.textContent = "Checking the fuel price log…"; return; }
+    if (priceTouched) {
+      if (!(val > 0 && val < 10)) { src.className = "src bad"; src.textContent = "Enter the price per litre, for example 1.5922."; return; }
+      const same = L && L.exact && Math.abs(L.p.ppl - val) < 1e-6;
+      src.textContent = same ? "Matches the price logged for " + fmtDate(date) + "." : "Used for this run only until you save it.";
+      if (!same && canWrite()) { btn.hidden = false; btn.textContent = "Save " + fmtPpl(val) + " as the " + fuel.toLowerCase() + " price for " + fmtDate(date); }
+      return;
+    }
+    if (!L) { src.className = "src warn"; src.textContent = "No " + fuel.toLowerCase() + " price logged yet. Enter the price for " + fmtDate(date) + "."; return; }
+    if (L.exact) { src.textContent = "Logged for " + fmtDate(date) + (L.p.note ? " · " + L.p.note : "") + "."; return; }
+    if (L.future) { src.className = "src warn"; src.textContent = "Nothing logged on or before " + fmtDate(date) + ", so this uses the " + fmtDate(L.p.date) + " price."; return; }
+    src.className = L.age > 14 ? "src warn" : "src";
+    src.textContent = "From " + fmtDate(L.p.date) + (L.age === 1 ? ", the day before." : ", " + L.age + " days before the run.") + (L.age > 14 ? " Update it if the price has moved." : "");
+  }
+
+  /* ---------- costing ---------- */
+  function overrides() {
+    const mEl = $("gmMiles"), tEl = $("gmTime");
+    const mi = mEl ? parseFloat(mEl.value) : NaN;
+    const raw = tEl ? tEl.value.trim() : "";
+    const hr = parseDuration(raw);
+    return { miles: mi > 0 ? mi : 0, hours: hr > 0 ? hr : 0, badTime: !!raw && !(hr > 0) };
+  }
+  function computeCosting(plan) {
+    const S = data.settings;
+    const pts = [plan.start, ...plan.seq];
+    if (plan.closed) pts.push(plan.start);
+    const legs = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const sl = hav(pts[i], pts[i + 1]);
+      const b = sl < 3 ? S.bands[0] : sl < 15 ? S.bands[1] : S.bands[2];
+      const road = sl * b.factor;
+      legs.push({ sl, road, drive: road / b.mph });
+    }
+    const sum = k => legs.reduce((a, l) => a + l[k], 0);
+    const sumSl = sum("sl");
+    let sumRoad = sum("road");
+    const gm = overrides();
+    let milesSrc = "est", timeSrc = "est";
+    if (gm.miles && sumRoad > 0) { const k = gm.miles / sumRoad; legs.forEach(l => { l.road *= k; l.drive *= k; }); sumRoad = gm.miles; milesSrc = "gm"; }
+    let sumDrive = sum("drive");
+    if (gm.hours && sumDrive > 0) { const k = gm.hours / sumDrive; legs.forEach(l => { l.drive *= k; }); sumDrive = gm.hours; timeSrc = "gm"; }
+    const n = plan.seq.length, dropH = S.dropMins / 60;
+    const workH = sumDrive + n * dropH;
+    const breakH = S.breakMins > 0 && workH > S.breakAfterH ? S.breakMins / 60 : 0;
+    const totalH = workH + breakH;
+    // arrival times: break taken before the first leg that would carry the run past the limit
+    const startMin = parseClock($("startTime").value) ?? 480;
+    let t = 0, breakAt = -1;
+    const etaH = [];
+    const maybeBreak = (legH, idx) => { if (breakH && breakAt < 0 && t + legH > S.breakAfterH) { t += breakH; breakAt = idx; } };
+    for (let i = 0; i < n; i++) { maybeBreak(legs[i].drive, i); t += legs[i].drive; etaH.push(t); t += dropH; }
+    if (plan.closed) { maybeBreak(legs[n].drive, n); t += legs[n].drive; }
+    if (breakH && breakAt < 0) { t += breakH; breakAt = plan.closed ? n + 1 : n; }
+    const v = currentVehicle();
+    const mpg = v && v.mpg ? v.mpg : null;
+    const litres = mpg ? sumRoad * L_PER_GAL / mpg : null;
+    const pv = parseFloat($("fuelPrice").value);
+    const price = pv > 0 && pv < 10 ? pv : null;
+    const fuelCost = litres != null && price != null ? litres * price : null;
+    const driverCost = S.driverRate > 0 ? totalH * S.driverRate : 0;
+    const runCost = fuelCost != null ? fuelCost + driverCost : null;
+    return {
+      legs, sumSl, sumRoad, milesSrc, sumDrive, timeSrc, badTime: gm.badTime, n, dropH, breakH, breakAt, totalH,
+      startMin, finishMin: startMin + t * 60, eta: etaH.map(h => startMin + h * 60),
+      v, mpg, fuel: v ? v.fuel : "Diesel", litres, price, fuelCost, driverCost, runCost, perDrop: runCost != null && n ? runCost / n : null
+    };
+  }
+
+  /* ---------- output builders ---------- */
+  function gmapsUrl(origin, dest, waypoints) {
+    const q = v => encodeURIComponent(v.pc + ", UK");
+    let u = "https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=" + q(origin) + "&destination=" + q(dest);
+    if (waypoints.length) u += "&waypoints=" + waypoints.map(q).join("%7C");
+    return u;
+  }
+  function buildLegs(plan) {
+    const pts = [plan.start, ...plan.seq]; if (plan.closed) pts.push(plan.start);
+    const names = pts.map((p, i) => (i === 0 || (plan.closed && i === pts.length - 1) ? "Start" : "Drop " + i));
+    const legs = [];
+    for (let a = 0; a < pts.length - 1;) {
+      const b = Math.min(a + 10, pts.length - 1);
+      legs.push({ a, b, from: names[a], to: names[b], fromPc: pts[a].pc, toPc: pts[b].pc, stops: b - a, url: gmapsUrl(pts[a], pts[b], pts.slice(a + 1, b)) });
+      a = b;
+    }
+    return legs;
+  }
+  function vehicleLabel(c) { return c.v ? c.v.name + (c.v.reg ? " (" + c.v.reg + ")" : "") : "No vehicle"; }
+  function csvText(plan) {
+    const q = v => { v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const c = computeCosting(plan);
+    const lines = [["Stop", "Postcode", "Name", "Street", "Town", "Latitude", "Longitude", "ETA", "Leg road miles", "Cumulative road miles"].join(",")];
+    lines.push(["Start", plan.start.pc, plan.start.labels.join(" / "), plan.start.street, plan.start.town, plan.start.lat, plan.start.lng, fmtClock(c.startMin), 0, 0].map(q).join(","));
+    let cum = 0;
+    plan.seq.forEach((s, i) => { cum += c.legs[i].road; lines.push([i + 1, s.pc, s.labels.join(" / "), s.street, s.town, s.lat, s.lng, fmtClock(c.eta[i]), c.legs[i].road.toFixed(1), cum.toFixed(1)].map(q).join(",")); });
+    if (plan.closed) { cum += c.legs[c.n].road; lines.push(["End", plan.start.pc, "Return to start", plan.start.street, plan.start.town, plan.start.lat, plan.start.lng, fmtClock(c.finishMin), c.legs[c.n].road.toFixed(1), cum.toFixed(1)].map(q).join(",")); }
+    lines.push("");
+    const sum = [
+      ["Run date", fmtDate(runDate())], ["Vehicle", vehicleLabel(c)], ["Fuel economy (MPG)", c.mpg ?? ""],
+      ["Road miles", c.sumRoad.toFixed(1) + (c.milesSrc === "gm" ? " (Google Maps)" : " (estimated)")],
+      ["Driving time", fmtDur(c.sumDrive) + (c.timeSrc === "gm" ? " (Google Maps)" : " (estimated)")],
+      ["Time at drops", fmtDur(c.n * c.dropH)], ["Break", c.breakH ? fmtDur(c.breakH) : "None"], ["Total time", fmtDur(c.totalH)],
+      ["Leave", fmtClock(c.startMin)], ["Finish", fmtClock(c.finishMin)],
+      ["Fuel used (litres)", c.litres != null ? c.litres.toFixed(1) : ""], [c.fuel + " price (£/litre)", c.price ?? ""],
+      ["Fuel cost (£)", c.fuelCost != null ? c.fuelCost.toFixed(2) : ""], ["Driver cost (£)", c.driverCost.toFixed(2)],
+      ["Run cost (£)", c.runCost != null ? c.runCost.toFixed(2) : ""], ["Cost per drop (£)", c.perDrop != null ? c.perDrop.toFixed(2) : ""]
+    ];
+    sum.forEach(r => lines.push(r.map(q).join(",")));
+    return lines.join("\n");
+  }
+  function listText(plan) {
+    const c = computeCosting(plan);
+    const out = [
+      "Run " + fmtDate(runDate()) + " · " + vehicleLabel(c),
+      fmtMi(c.sumRoad) + " road miles" + (c.milesSrc === "gm" ? "" : " (est.)") + " · " + fmtDur(c.totalH) + " · " + (c.litres != null ? fmtL(c.litres) + " L " + c.fuel.toLowerCase() : "fuel not set") + (c.fuelCost != null ? " · " + money(c.fuelCost) : ""),
+      "",
+      fmtClock(c.startMin) + "  Start  " + plan.start.pc + "  " + plan.start.labels.join(" / ")
+    ];
+    plan.seq.forEach((s, i) => {
+      if (c.breakAt === i) out.push("       Break " + fmtDur(c.breakH));
+      out.push(fmtClock(c.eta[i]) + "  " + String(i + 1).padStart(2, " ") + ".  " + s.pc + (s.labels.length ? "  " + s.labels.join(" / ") : "") + (s.town ? "  (" + s.town + ")" : ""));
+    });
+    if (c.breakAt >= plan.seq.length) out.push("       Break " + fmtDur(c.breakH));
+    if (plan.closed) out.push(fmtClock(c.finishMin) + "  End    " + plan.start.pc + "  Return to start");
+    return out.join("\n");
+  }
+  function postcodesText(plan) {
+    return [plan.start.pc, ...plan.seq.map(s => s.pc), ...(plan.closed ? [plan.start.pc] : [])].join("\n");
+  }
+
+  /* ---------- map ---------- */
+  function mapSvg(plan, W) {
+    const all = [plan.start, ...plan.seq];
+    const lat0 = all.reduce((a, p) => a + p.lat, 0) / all.length;
+    const kx = Math.cos(lat0 * Math.PI / 180);
+    const P = p => [p.lng * kx, -p.lat];
+    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+    all.forEach(p => { const [x, y] = P(p); minx = Math.min(minx, x); maxx = Math.max(maxx, x); miny = Math.min(miny, y); maxy = Math.max(maxy, y); });
+    let w = Math.max(maxx - minx, 0.02), h = Math.max(maxy - miny, 0.02);
+    W = Math.round(Math.max(280, Math.min(900, W || 640)));
+    const H = Math.round(Math.min(Math.max(420, W * 0.85), Math.max(260, W * h / w)));
+    const pad = 30, s = Math.min((W - 2 * pad) / w, (H - 2 * pad - 18) / h);
+    const cx = (minx + maxx) / 2, cy = (miny + maxy) / 2;
+    const X = p => (W / 2 + (P(p)[0] - cx) * s), Y = p => ((H - 18) / 2 + (P(p)[1] - cy) * s);
+    const many = plan.seq.length > 45, rad = many ? 7 : 10, fs = many ? 8.5 : 11.5;
+    let g = "";
+    // faint graticule every 0.1° (or 0.5° for wide areas)
+    const step = (maxy - miny) > 1.2 || (maxx - minx) / kx > 1.8 ? 0.5 : 0.1;
+    for (let la = Math.ceil(-maxy / step) * step; la <= -miny + 1e-9; la += step) { const y = Y({ lat: la, lng: 0 }); g += '<line class="m-grid" x1="0" x2="' + W + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '"/>'; }
+    for (let lo = Math.ceil(minx / kx / step) * step; lo <= maxx / kx + 1e-9; lo += step) { const x = X({ lat: lat0, lng: lo }); g += '<line class="m-grid" y1="0" y2="' + (H - 18) + '" x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '"/>'; }
+    const route = [plan.start, ...plan.seq].map(p => X(p).toFixed(1) + "," + Y(p).toFixed(1)).join(" ");
+    let svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Map of the planned route with ' + plan.seq.length + ' numbered drops">' + g;
+    if (plan.closed && plan.seq.length) { const l = plan.seq[plan.seq.length - 1]; svg += '<line class="m-return" x1="' + X(l).toFixed(1) + '" y1="' + Y(l).toFixed(1) + '" x2="' + X(plan.start).toFixed(1) + '" y2="' + Y(plan.start).toFixed(1) + '"/>'; }
+    svg += '<polyline class="m-route" points="' + route + '"/>';
+    for (let i = plan.seq.length - 1; i >= 0; i--) {
+      const p = plan.seq[i], x = X(p).toFixed(1), y = Y(p).toFixed(1);
+      svg += '<g><title>' + (i + 1) + ". " + esc(p.pc) + (p.labels.length ? " " + esc(p.labels.join(" / ")) : "") + '</title><circle class="m-stop" cx="' + x + '" cy="' + y + '" r="' + rad + '"/><text class="m-num" x="' + x + '" y="' + y + '" font-size="' + fs + '">' + (i + 1) + "</text></g>";
+    }
+    const sx = X(plan.start), sy = Y(plan.start);
+    svg += '<g><title>Start ' + esc(plan.start.pc) + '</title><rect class="m-depot" x="' + (sx - 11).toFixed(1) + '" y="' + (sy - 11).toFixed(1) + '" width="22" height="22" rx="4"/><text class="m-dtext" x="' + sx.toFixed(1) + '" y="' + sy.toFixed(1) + '">D</text></g>';
+    // scale bar
+    const pxPerMile = s / 69.05;
+    const nice = [0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200].find(m => m * pxPerMile >= 70) || 200;
+    const len = nice * pxPerMile, by = H - 10;
+    svg += '<path class="m-scale" d="M12 ' + (by - 5) + " V" + by + " H" + (12 + len).toFixed(1) + " V" + (by - 5) + '"/><text class="m-stext" x="' + (18 + len).toFixed(1) + '" y="' + (by - 1) + '">' + nice + (nice === 1 ? " mile" : " miles") + "</text>";
+    svg += '<text class="m-stext" x="' + (W - 12) + '" y="' + (by - 1) + '" text-anchor="end">N ↑</text>';
+    return svg + "</svg>";
+  }
+
+  /* ---------- rendering ---------- */
+  function mapWidth() { const el = $("results"); return el ? el.clientWidth - 34 : 640; }
+  let lastMapW = 0, resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const mb = $("mapbox"), w = mapWidth();
+      if (mb && lastPlan && lastPlan.seq.length && Math.abs(w - lastMapW) > 24) { lastMapW = w; mb.innerHTML = mapSvg(lastPlan, w); }
+    }, 150);
+  });
+  function renderError(msg) {
+    lastPlan = null;
+    $("results").innerHTML = '<div class="panel"><div class="issue bad"><span>!</span><span>' + esc(msg) + "</span></div></div>";
+  }
+  function issuesHtml(issues) {
+    if (!issues.length) return "";
+    const bad = issues.filter(i => i.kind === "bad").length;
+    return '<div class="panel"><h2>' + (bad ? bad + " left out" : "Check these") + (issues.length - bad && bad ? " · " + (issues.length - bad) + " approximate" : "") + '</h2><div class="issues">' +
+      issues.map(i => '<div class="issue ' + i.kind + '"><code>' + esc(i.code) + "</code><span>" + esc(i.msg) + "</span></div>").join("") + "</div></div>";
+  }
+  function renderResults(plan) {
+    lastPlan = plan;
+    qrOpen.clear();
+    if (!plan.seq.length) {
+      $("results").innerHTML = issuesHtml(plan.issues) + '<div class="panel"><div class="empty">No drops could be placed, so there is no route to show yet.</div></div>';
+      return;
+    }
+    lastMapW = mapWidth();
+    let h = '<div class="panel">';
+    h += '<div class="tiles" id="tiles"></div>';
+    if (usingExample) h += '<span class="example-flag">Example drops. Replace them with your own.</span>';
+    h += '<div class="mapbox" id="mapbox">' + mapSvg(plan, lastMapW) + "</div>";
+    h += '<p class="hint" id="finishLine"></p></div>';
+
+    h += '<div class="panel"><div class="phead"><h2>Run costing</h2><span class="src" id="costDate"></span></div>';
+    h += '<div class="cost-grid" id="costBody"></div>';
+    h += '<div class="override"><div class="eyebrow">Google Maps figures</div>' +
+      '<p class="hint">Open each leg below in Google Maps, add up the miles and driving time, and enter the totals. They replace the estimates, and the times and fuel follow.</p>' +
+      '<div class="two"><div><label class="fl" for="gmMiles">Road miles</label><div class="unit"><input class="inp num" type="number" id="gmMiles" min="0" step="0.1" inputmode="decimal"><span>mi</span></div></div>' +
+      '<div><label class="fl" for="gmTime">Driving time</label><input class="inp num" type="text" id="gmTime" placeholder="e.g. 3:25" autocomplete="off"></div></div>' +
+      '<div class="ta-foot"><span id="gmNote">Leave blank to use the estimates.</span><button type="button" class="linkbtn" id="gmClear">Clear</button></div></div></div>';
+
+    h += '<div class="panel"><h2>Send to Google Maps</h2><p class="hint" id="legsHint"></p><div class="legs" id="legsGrid"></div>' +
+      '<p class="hint">To put a leg on a driver\'s phone, scan its QR code with the phone camera, or copy the link into a text or WhatsApp message. If you\'re signed in to Google, you can also open the leg in Google Maps on this computer and use Send directions to your phone.</p>';
+    h += '<div><div class="eyebrow" style="margin-bottom:8px">Other apps</div><div class="btnrow">' +
+      '<button type="button" class="btn sm" data-copy="pcs">Copy postcodes</button>' +
+      '<button type="button" class="btn sm" data-copy="list">Copy run sheet</button>' +
+      '<button type="button" class="btn sm" data-copy="csv">Copy CSV</button>' +
+      '<button type="button" class="btn sm" id="dlCsv" hidden>Download CSV</button></div>' +
+      '<textarea class="copyout" id="copyOut" readonly hidden aria-label="Text to copy"></textarea></div></div>';
+
+    h += issuesHtml(plan.issues);
+    h += '<div class="panel"><div class="phead"><h2>Run sheet</h2><span class="src" id="sheetNote"></span></div><ol class="stops" id="sheetList"></ol></div>';
+    $("results").innerHTML = h;
+    ["gmMiles", "gmTime"].forEach(id => $(id).addEventListener("input", updateCosting));
+    $("gmClear").addEventListener("click", () => { $("gmMiles").value = ""; $("gmTime").value = ""; updateCosting(); });
+    $("legsGrid").addEventListener("click", e => {
+      const q = e.target.closest("[data-qr]"), c = e.target.closest("[data-legcopy]");
+      if (q) { const i = +q.dataset.qr; if (qrOpen.has(i)) qrOpen.delete(i); else qrOpen.add(i); updateCosting(); }
+      if (c) { const l = currentLegs[+c.dataset.legcopy]; if (l) copyText(l.url, "Leg " + (+c.dataset.legcopy + 1) + " link"); }
+    });
+    wireExports();
+    updateCosting();
+  }
+
+  function qrSvg(text, n) {
+    try {
+      const qr = window.qrcode(0, "M"); qr.addData(text); qr.make();
+      const m = qr.getModuleCount(), q = 4, size = m + q * 2;
+      let d = "";
+      for (let r = 0; r < m; r++) for (let c = 0; c < m; c++) if (qr.isDark(r, c)) d += "M" + (c + q) + " " + (r + q) + "h1v1h-1z";
+      return '<svg viewBox="0 0 ' + size + " " + size + '" role="img" aria-label="QR code for leg ' + n + '" shape-rendering="crispEdges"><rect width="' + size + '" height="' + size + '" fill="var(--qr-bg)"/><path d="' + d + '" fill="var(--qr-fg)"/></svg>';
+    } catch (e) { return '<span>Couldn\'t draw the QR code. Use Copy link instead.</span>'; }
+  }
+  function tile(v, unit, k, dim) {
+    return '<div class="stat' + (dim ? " dim" : "") + '"><span class="v">' + v + (unit ? "<small>" + unit + "</small>" : "") + '</span><span class="k">' + k + "</span></div>";
+  }
+  function row(k, v, cls) { return '<div class="row' + (cls ? " " + cls : "") + '"><span>' + k + "</span><span>" + v + "</span></div>"; }
+
+  function updateCosting() {
+    const plan = lastPlan;
+    if (!plan || !plan.seq.length || !$("tiles")) return;
+    const c = computeCosting(plan);
+    const S = data.settings;
+    const fuelLc = c.fuel.toLowerCase();
+    const hh = Math.floor(Math.round(c.totalH * 60) / 60), mm = Math.round(c.totalH * 60) % 60;
+
+    $("tiles").innerHTML =
+      tile(plan.seq.length, "", plan.seq.length === 1 ? "drop" : "drops") +
+      tile(fmtMi(c.sumRoad), "", c.milesSrc === "gm" ? "road miles, Google Maps" : "road miles, estimated") +
+      tile(hh + "<small>h</small> " + pad2(mm), "m", "total time") +
+      (c.litres != null ? tile(fmtL(c.litres), "L", "of " + fuelLc) : tile("–", "", c.v ? "litres · add MPG" : "litres · pick a vehicle", true)) +
+      (c.fuelCost != null ? tile(money(c.fuelCost), "", "fuel cost") : tile("–", "", "fuel cost · add price", true));
+
+    const last = plan.seq[plan.seq.length - 1];
+    $("finishLine").textContent = "Leaves " + fmtClock(c.startMin) + " and " + (plan.closed ? "gets back to " + plan.start.pc + " at about " + fmtClock(c.finishMin) + "." : "finishes at drop " + plan.seq.length + ", " + last.pc + (last.town ? " in " + last.town : "") + ", at about " + fmtClock(c.finishMin) + ".");
+    $("costDate").textContent = fmtDate(runDate()) + " · " + vehicleLabel(c);
+
+    const estTag = '<span class="tag est">est.</span>', gmTag = '<span class="tag gm">Google Maps</span>';
+    let b = "";
+    b += '<div class="cb"><h3>Distance</h3>' +
+      row("Straight line", fmtMi(c.sumSl) + " mi") +
+      row("Road allowance", "×" + (c.sumRoad / c.sumSl).toFixed(2)) +
+      row("Road miles", fmtMi(c.sumRoad) + " mi" + (c.milesSrc === "gm" ? gmTag : estTag), "total") + "</div>";
+    b += '<div class="cb"><h3>Time</h3>' +
+      row("Driving", fmtDur(c.sumDrive) + (c.timeSrc === "gm" ? gmTag : estTag)) +
+      row("At drops", c.n + " × " + S.dropMins + " min = " + fmtDur(c.n * c.dropH)) +
+      row("Break", c.breakH ? fmtDur(c.breakH) : "None, under " + S.breakAfterH + " h") +
+      row("Total", fmtDur(c.totalH), "total") +
+      row("Leave → finish", fmtClock(c.startMin) + " → " + fmtClock(c.finishMin)) + "</div>";
+    b += '<div class="cb"><h3>Fuel</h3>' +
+      row("Vehicle", c.v ? esc(vehicleLabel(c)) : "Not set") +
+      row("Economy", c.mpg ? c.mpg + " MPG · " + (282.481 / c.mpg).toFixed(1) + " L/100 km" : "Not set") +
+      row("Fuel used", c.litres != null ? c.litres.toFixed(1) + " L" : "–") +
+      row(c.fuel + " price", c.price != null ? fmtPpl(c.price) + "/L" : "Not set") +
+      row("Fuel cost", c.fuelCost != null ? money(c.fuelCost) : "–", "total") + "</div>";
+    b += '<div class="cb"><h3>Run cost</h3>' +
+      row("Fuel", c.fuelCost != null ? money(c.fuelCost) : "–") +
+      row("Driver", fmtDur(c.totalH) + " × " + money(S.driverRate) + " = " + money(c.driverCost)) +
+      row("Run cost", c.runCost != null ? money(c.runCost) : "–", "total") +
+      row("Per drop", c.perDrop != null ? money(c.perDrop) : "–") + "</div>";
+    $("costBody").innerHTML = b;
+
+    const mEl = $("gmMiles"), tEl = $("gmTime");
+    if (document.activeElement !== mEl) mEl.placeholder = c.milesSrc === "gm" ? "" : "est. " + fmtMi(c.sumRoad);
+    $("gmNote").className = c.badTime ? "src bad" : "";
+    $("gmNote").textContent = c.badTime ? "Enter the time as hours and minutes, for example 3:25 or 3h 25m." : (c.milesSrc === "gm" || c.timeSrc === "gm") ? "Using your Google Maps figures." : "Leave blank to use the estimates.";
+
+    // Google Maps legs with their share of miles and time
+    const legs = buildLegs(plan);
+    currentLegs = legs;
+    const hasQr = typeof window.qrcode === "function";
+    $("legsHint").textContent = legs.length > 1 ? "Google Maps takes up to 10 stops per link, so the run is split into " + legs.length + " legs. Open the next leg when you reach the end of the last one." : "Opens the whole run in Google Maps with every drop in order.";
+    $("legsGrid").innerHTML = legs.map((l, i) => {
+      let mi = 0, dr = 0;
+      for (let k = l.a; k < l.b; k++) { mi += c.legs[k].road; dr += c.legs[k].drive; }
+      return '<div class="leg"><div><div class="eyebrow">Leg ' + (i + 1) + " · " + l.stops + (l.stops === 1 ? " stop" : " stops") + '</div><div class="lt">' + l.from + " → " + l.to + '</div><div class="ls">' + esc(l.fromPc) + " → " + esc(l.toPc) + '</div><div class="lm">' + (c.milesSrc === "gm" ? "" : "≈ ") + fmtMi(mi) + " mi · " + fmtDur(dr) + " driving</div></div>" +
+        '<a class="btn gmaps" href="' + l.url + '" target="_blank" rel="noopener">Open in Google Maps ↗</a>' +
+        '<div class="btnrow">' + (hasQr ? '<button type="button" class="btn sm" data-qr="' + i + '" aria-expanded="' + qrOpen.has(i) + '">' + (qrOpen.has(i) ? "Hide QR code" : "Phone QR code") + "</button>" : "") +
+        '<button type="button" class="btn sm" data-legcopy="' + i + '">Copy link</button></div>' +
+        (hasQr && qrOpen.has(i) ? '<div class="qrbox">' + qrSvg(l.url, i + 1) + "<span>Scan with the phone camera to open leg " + (i + 1) + " in Google Maps</span></div>" : "") +
+        "</div>";
+    }).join("");
+
+    // run sheet
+    $("sheetNote").textContent = "Arrival times allow " + S.dropMins + " min per drop";
+    let s = '<li><span class="plate depot">D</span><div><div class="pc">' + esc(plan.start.pc) + '</div><div class="where">' + esc(plan.start.labels.join(" / ")) + '</div></div><div class="dist"><span class="eta">' + fmtClock(c.startMin) + '</span><span class="mi">leave</span></div></li>';
+    const brk = '<li class="brk"><span class="plate pause">BREAK</span><div>' + fmtDur(c.breakH) + " break</div><div></div></li>";
+    plan.seq.forEach((st, i) => {
+      if (c.breakAt === i) s += brk;
+      const where = [st.street && "near " + st.street, st.town].filter(Boolean).join(", ");
+      s += '<li><span class="plate" aria-label="Drop ' + (i + 1) + '">' + (i + 1) + "</span><div>" +
+        '<div><span class="pc">' + esc(st.pc) + "</span>" + (st.approx ? '<span class="tag approx">approx</span>' : "") + (st.count > 1 ? '<span class="tag multi">×' + st.count + "</span>" : "") + "</div>" +
+        (st.labels.length ? '<div class="who">' + esc(st.labels.join(" / ")) + "</div>" : "") +
+        (where ? '<div class="where">' + esc(where) + "</div>" : "") +
+        '</div><div class="dist"><span class="eta">' + fmtClock(c.eta[i]) + '</span><span class="mi">+' + fmtMi(c.legs[i].road) + " mi</span>" +
+        '<a class="go" href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(st.pc + ", UK") + '" target="_blank" rel="noopener">Navigate ↗</a></div></li>';
+    });
+    if (c.breakAt >= plan.seq.length) s += brk;
+    if (plan.closed) s += '<li><span class="plate depot">D</span><div><div class="pc">' + esc(plan.start.pc) + '</div><div class="where">Back to start</div></div><div class="dist"><span class="eta">' + fmtClock(c.finishMin) + '</span><span class="mi">+' + fmtMi(c.legs[c.n].road) + " mi</span></div></li>";
+    $("sheetList").innerHTML = s;
+  }
+
+  /* ---------- fleet panel ---------- */
+  let editingId = null, showAllPrices = false;
+  function renderFleet() {
+    const pill = $("syncPill");
+    pill.className = "pill";
+    if (data.mode === "loading") pill.textContent = "Loading…";
+    else if (data.mode === "db") { pill.textContent = data.readOnly ? "View only" : "Shared with everyone who uses this planner"; if (!data.readOnly) pill.className = "pill ok"; }
+    else if (data.mode === "local") { pill.textContent = "Saved in this browser only"; pill.className = "pill warn"; }
+    else { pill.textContent = "Couldn't reach the shared list"; pill.className = "pill warn"; }
+    const w = canWrite();
+
+    const fb = $("fleetBody");
+    if (!data.fleetLoaded) fb.innerHTML = '<tr class="empty-row"><td colspan="6">Loading vehicles…</td></tr>';
+    else if (!data.fleet.length) fb.innerHTML = '<tr class="empty-row"><td colspan="6">No vehicles yet. Add each van with its MPG below and it will appear in the Vehicle list.</td></tr>';
+    else fb.innerHTML = data.fleet.map(v =>
+      "<tr><td><div>" + esc(v.name) + "</div>" + (v.reg ? '<div class="reg">' + esc(v.reg) + "</div>" : "") + "</td><td>" + esc(v.kind || "–") + "</td><td>" + esc(v.fuel) + '</td><td class="num">' + (v.mpg ? v.mpg : "–") + '</td><td class="num">' + (v.mpg ? (282.481 / v.mpg).toFixed(1) : "–") + '</td><td class="act">' +
+      (w ? '<button type="button" class="btn sm" data-vedit="' + esc(v.id) + '">Edit</button><button type="button" class="btn sm danger" data-vdel="' + esc(v.id) + '">Delete</button>' : "") + "</td></tr>").join("");
+
+    const pb = $("priceBody");
+    const sorted = data.prices.slice().sort((a, b) => b.date.localeCompare(a.date) || a.fuel.localeCompare(b.fuel));
+    const shown = showAllPrices ? sorted : sorted.slice(0, 8);
+    if (!data.pricesLoaded) pb.innerHTML = '<tr class="empty-row"><td colspan="5">Loading prices…</td></tr>';
+    else if (!sorted.length) pb.innerHTML = '<tr class="empty-row"><td colspan="5">No prices logged yet. Log the price you paid and runs on or after that date will use it.</td></tr>';
+    else pb.innerHTML = shown.map(p =>
+      '<tr><td class="num" style="text-align:left">' + fmtDate(p.date) + "</td><td>" + esc(p.fuel) + '</td><td class="num">' + fmtPpl(p.ppl) + "</td><td>" + esc(p.note || "") + '</td><td class="act">' +
+      (w ? '<button type="button" class="btn sm danger" data-pdel="' + esc(p.id) + '">Delete</button>' : "") + "</td></tr>").join("");
+    const more = $("pMore");
+    more.hidden = sorted.length <= 8;
+    more.textContent = showAllPrices ? "Show the latest 8" : "Show all " + sorted.length + " prices";
+
+    ["vName", "vReg", "vKind", "vFuel", "vMpg", "vSave", "pDate", "pFuel", "pPpl", "pNote", "pSave"].forEach(id => { $(id).disabled = !w; });
+    $("vForm").hidden = $("pForm").hidden = data.readOnly;
+  }
+  function resetVehicleForm() {
+    editingId = null; $("vForm").reset(); $("vKind").value = "Panel van"; $("vFuel").value = "Diesel";
+    $("vSave").textContent = "Add vehicle"; $("vCancel").hidden = true; $("vErr").textContent = "";
+  }
+  function armDelete(btn, action) {
+    if (btn.dataset.armed) { action(); return; }
+    btn.dataset.armed = "1"; const old = btn.textContent; btn.textContent = "Confirm delete";
+    setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = old; } }, 4000);
+  }
+
+  /* ---------- planning ---------- */
+  async function plan() {
+    const btn = $("planBtn");
+    const startPc = normPc($("startPc").value);
+    if (!startPc) { renderError("The start point needs to be a full postcode, like PR2 2TE."); return; }
+    $("startPc").value = startPc;
+    const { entries, unread } = parseDrops($("drops").value);
+    if (!entries.length) { renderError(unread.length ? "None of those lines contain a full postcode (for example BB2 1DQ)." : "Add some postcodes first."); return; }
+
+    const byPc = new Map();
+    entries.forEach(e => {
+      if (e.pc === startPc) return;
+      if (!byPc.has(e.pc)) byPc.set(e.pc, { pc: e.pc, labels: [], count: 0 });
+      const s = byPc.get(e.pc); s.count++; if (e.label && !s.labels.includes(e.label)) s.labels.push(e.label);
+    });
+    const atStart = entries.filter(e => e.pc === startPc).length;
+    if (byPc.size > MAX_STOPS) { renderError("That's " + byPc.size + " stops. Split the run into batches of " + MAX_STOPS + " or fewer."); return; }
+
+    btn.disabled = true; btn.textContent = "Looking up postcodes…";
+    try {
+      const [startLoc, ...locs] = await Promise.all([geocode(startPc), ...[...byPc.values()].map(s => geocode(s.pc))]);
+      if (startLoc.err) { renderError("Start point " + startPc + ": " + startLoc.err + "."); return; }
+      const issues = [];
+      unread.forEach(u => issues.push({ kind: "bad", code: u, msg: "No full postcode on this line" }));
+      if (atStart) issues.push({ kind: "warn", code: startPc, msg: "Same as the start point, so it's left out of the drops" });
+      const stops = [];
+      [...byPc.values()].forEach((s, i) => {
+        const g = locs[i];
+        if (g.err) { issues.push({ kind: "bad", code: s.pc, msg: g.err }); return; }
+        if (g.approx) issues.push({ kind: "warn", code: s.pc, msg: g.approx });
+        stops.push(Object.assign({}, s, g));
+      });
+      const start = Object.assign({ pc: startPc, labels: [startPc === DEPOT_PC ? "Heliolink depot" : "Start"], count: 0 }, startLoc);
+      $("startMeta").textContent = startPc === DEPOT_PC ? "Heliolink depot, Leeward Road, Ashton-on-Ribble" : [startLoc.street && "near " + startLoc.street, startLoc.town].filter(Boolean).join(", ") || "Start point";
+      $("chipPc").textContent = startPc;
+      if (!stops.length) { renderResults({ start, seq: [], closed: false, issues }); return; }
+
+      btn.textContent = "Optimising…";
+      await sleep(20);
+      const closed = $("returnDepot").checked;
+      const pts = [start, ...stops];
+      const order = solve(pts, closed);
+      const seq = order.slice(1, closed ? -1 : undefined).map(i => pts[i]);
+      renderResults({ start, seq, closed, issues });
+    } finally {
+      btn.disabled = false; btn.textContent = "Plan route";
+    }
+  }
+
+  /* ---------- exports ---------- */
+  let downloads = null;
+  async function copyText(text, label) {
+    const out = $("copyOut");
+    try {
+      await navigator.clipboard.writeText(text);
+      out.hidden = true;
+      toast(label + " copied");
+    } catch (e) {
+      out.value = text; out.hidden = false; out.focus(); out.select();
+      toast("Select all and copy from the box below");
+    }
+  }
+  function wireExports() {
+    document.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => {
+      if (!lastPlan) return;
+      const k = b.dataset.copy;
+      if (k === "pcs") copyText(postcodesText(lastPlan), "Postcodes");
+      else if (k === "list") copyText(listText(lastPlan), "Run sheet");
+      else copyText(csvText(lastPlan), "CSV");
+    }));
+    const dl = $("dlCsv");
+    if (dl && downloads) {
+      dl.hidden = false;
+      dl.addEventListener("click", async () => {
+        if (!lastPlan) return;
+        const name = "drop-route-" + runDate() + ".csv";
+        try { await downloads.save({ filename: name, data: csvText(lastPlan) }); toast("CSV saved"); }
+        catch (e) {
+          if (e && e.code === "declined") return;
+          if (e && e.code === "rate_limited") { toast("A save is already open"); return; }
+          dl.hidden = true; toast("Downloads aren't available here. Use Copy CSV instead");
+        }
+      });
+    }
+  }
+  try {
+    if (window.claude && typeof window.claude.use === "function") {
+      window.claude.use("downloads").then(ns => { downloads = ns; if (ns && lastPlan && $("dlCsv")) wireExports(); }).catch(() => {});
+    }
+  } catch (e) { /* no viewer */ }
+
+  /* ---------- wiring ---------- */
+  $("vKind").innerHTML = KINDS.map(k => "<option>" + esc(k) + "</option>").join("");
+  resetVehicleForm();
+  $("runDate").value = todayISO();
+  $("pDate").value = todayISO();
+
+  $("planBtn").addEventListener("click", () => { usingExample = $("drops").value.trim() === EXAMPLE; saveDraft(); plan(); });
+  $("drops").addEventListener("input", () => { updateCount(); saveDraft(); });
+  $("startPc").addEventListener("change", saveDraft);
+  $("startPc").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("planBtn").click(); } });
+  $("returnDepot").addEventListener("change", () => { saveDraft(); if (lastPlan && lastPlan.seq.length) $("planBtn").click(); });
+  $("resetStart").addEventListener("click", () => { $("startPc").value = DEPOT_PC; saveDraft(); });
+  $("loadExample").addEventListener("click", () => { $("drops").value = EXAMPLE; updateCount(); saveDraft(); });
+  $("clearDrops").addEventListener("click", () => { $("drops").value = ""; updateCount(); saveDraft(); $("drops").focus(); });
+
+  $("runDate").addEventListener("change", () => { priceTouched = false; refreshPrice(); updateCosting(); });
+  $("startTime").addEventListener("change", () => { saveDraft(); updateCosting(); });
+  $("vehicle").addEventListener("change", () => { draft.vehicle = $("vehicle").value; saveDraft(); priceTouched = false; showVehicleMeta(); refreshPrice(); updateCosting(); });
+  $("customMpg").addEventListener("input", () => { saveDraft(); updateCosting(); });
+  $("customFuel").addEventListener("change", () => { saveDraft(); priceTouched = false; refreshPrice(); updateCosting(); });
+  $("fuelPrice").addEventListener("input", () => { priceTouched = true; refreshPrice(); updateCosting(); });
+  $("fuelPrice").addEventListener("blur", () => { if (!$("fuelPrice").value.trim()) { priceTouched = false; refreshPrice(); updateCosting(); } });
+  $("savePriceBtn").addEventListener("click", async () => {
+    const v = currentVehicle(), val = parseFloat($("fuelPrice").value), date = runDate();
+    if (!(val > 0 && val < 10)) return;
+    const ok = await putPrice({ date, fuel: v ? v.fuel : "Diesel", ppl: +val.toFixed(4), note: "From the planner" });
+    if (ok) { priceTouched = false; toast("Saved " + fmtPpl(val) + " for " + fmtDate(date)); refreshPrice(); }
+  });
+  SET_IDS.forEach(id => $(id).addEventListener("input", () => {
+    if (data.readOnly) return;
+    data.settings = readSettingsInputs();
+    queueSettingsSave(); updateCosting();
+  }));
+  SET_IDS.forEach(id => $(id).addEventListener("blur", () => fillSettingsInputs()));
+
+  $("vForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!canWrite()) return;
+    const name = $("vName").value.trim(), mpg = parseFloat($("vMpg").value);
+    if (!name) { $("vErr").textContent = "Give the vehicle a name, such as Transit 1."; $("vName").focus(); return; }
+    if (!(mpg > 0 && mpg < 100)) { $("vErr").textContent = "Enter the fuel economy in miles per UK gallon, for example 32."; $("vMpg").focus(); return; }
+    const v = normVehicle(editingId || newId("v"), { name, reg: $("vReg").value.trim(), kind: $("vKind").value, fuel: $("vFuel").value, mpg: +mpg.toFixed(1) });
+   
+    if (!editingId && (!$("vehicle").value || $("vehicle").value === "__other")) pendingSelect = v.id;
+    $("vSave").disabled = true;
+    const ok = await putVehicle(v);
+    $("vSave").disabled = false;
+    if (ok) { toast((editingId ? "Updated " : "Added ") + v.name); resetVehicleForm(); }
+  });
+  $("vCancel").addEventListener("click", resetVehicleForm);
+  $("fleetBody").addEventListener("click", e => {
+    const ed = e.target.closest("[data-vedit]"), del = e.target.closest("[data-vdel]");
+    if (ed) {
+      const v = data.fleet.find(x => x.id === ed.dataset.vedit); if (!v) return;
+      editingId = v.id; $("vName").value = v.name; $("vReg").value = v.reg; $("vKind").value = KINDS.includes(v.kind) ? v.kind : "Panel van"; $("vFuel").value = v.fuel; $("vMpg").value = v.mpg || "";
+      $("vSave").textContent = "Save changes"; $("vCancel").hidden = false; $("vErr").textContent = ""; $("vName").focus();
+    }
+    if (del) armDelete(del, async () => { const id = del.dataset.vdel; const v = data.fleet.find(x => x.id === id); if (await removeVehicle(id)) toast("Deleted " + (v ? v.name : "vehicle")); });
+  });
+  $("pForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!canWrite()) return;
+    const date = $("pDate").value, ppl = parseFloat($("pPpl").value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { $("pErr").textContent = "Pick the date the price applies from."; return; }
+    if (!(ppl > 0.5 && ppl < 5)) { $("pErr").textContent = "Enter the price in pounds per litre, for example 1.5922."; $("pPpl").focus(); return; }
+    $("pErr").textContent = ""; $("pSave").disabled = true;
+    const ok = await putPrice({ date, fuel: $("pFuel").value, ppl: +ppl.toFixed(4), note: $("pNote").value.trim() });
+    $("pSave").disabled = false;
+    if (ok) { toast("Logged " + fmtPpl(ppl) + " for " + fmtDate(date)); $("pPpl").value = ""; $("pNote").value = ""; priceTouched = false; refreshPrice(); }
+  });
+  $("priceBody").addEventListener("click", e => {
+    const del = e.target.closest("[data-pdel]");
+    if (del) armDelete(del, async () => { if (await removePrice(del.dataset.pdel)) toast("Price deleted"); });
+  });
+  $("pMore").addEventListener("click", () => { showAllPrices = !showAllPrices; renderFleet(); });
+
+  // initial state: the viewer's last draft, or the example run
+  if (typeof draft.drops === "string" && draft.drops.trim()) {
+    $("drops").value = draft.drops;
+    if (draft.start) $("startPc").value = draft.start;
+    $("returnDepot").checked = !!draft.ret;
+  } else {
+    $("drops").value = EXAMPLE;
+  }
+  if (draft.startTime && parseClock(draft.startTime) != null) $("startTime").value = draft.startTime;
+  if (draft.customMpg) $("customMpg").value = draft.customMpg;
+  if (FUELS.includes(draft.customFuel)) $("customFuel").value = draft.customFuel;
+  fillSettingsInputs();
+  renderFleet();
+  refreshVehicleSelect();
+  refreshPrice();
+  updateCount();
+  usingExample = $("drops").value.trim() === EXAMPLE;
+  plan();
+  initData();
+})();
+</script>
+
+</body></html>

@@ -16,7 +16,7 @@ import string
 from datetime import datetime, date, timedelta
 
 from flask import (Flask, render_template, redirect, url_for, request, flash,
-                    jsonify, Response, abort)
+                    jsonify, Response, abort, send_from_directory)
 from flask_login import (LoginManager, login_user, logout_user, login_required,
                           current_user)
 
@@ -602,6 +602,30 @@ def register_routes(app):
     # Dispatcher: fleet (drivers & vehicles)
     # -----------------------------------------------------------------
 
+    # --- Drop Planner (multi-drop route + cost planner, static page) ---
+    DROP_PLANNER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_planner")
+
+    @app.route("/drop-planner")
+    @login_required
+    def drop_planner_redirect():
+        return redirect("/drop-planner/")
+
+    @app.route("/drop-planner/")
+    @login_required
+    def drop_planner():
+        require_role("admin", "dispatcher")
+        return send_from_directory(DROP_PLANNER_DIR, "index.html")
+
+    @app.route("/drop-planner/pc/<area>.json")
+    @login_required
+    def drop_planner_postcodes(area):
+        require_role("admin", "dispatcher")
+        if not area.isalpha() or len(area) > 2:
+            abort(404)
+        resp = send_from_directory(os.path.join(DROP_PLANNER_DIR, "pc"), area.upper() + ".json")
+        resp.cache_control.max_age = 86400
+        return resp
+
     @app.route("/fleet")
     @login_required
     def fleet():
@@ -853,6 +877,14 @@ def register_routes(app):
     # -----------------------------------------------------------------
 
     @app.route("/routes")
+    @login_required
+    def routes_home():
+        # Route Planner is now the Drop Planner
+        return redirect(url_for("drop_planner"))
+
+    # Previous route planner (assign orders to drivers / multi-drop lists).
+    # Kept so the driver app and existing links keep working; not in the menu.
+    @app.route("/routes/assign")
     @login_required
     def routes_list():
         require_role("admin", "dispatcher")

@@ -50,6 +50,9 @@
           <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">Billing</a>
           <ul class="dropdown-menu">
             <li><a class="dropdown-item" href="{{ url_for('invoices_list') }}">Invoices</a></li>
+            {% if current_user.role == 'admin' %}
+            <li><a class="dropdown-item" href="{{ url_for('cost_settings') }}">Cost &amp; margin settings</a></li>
+            {% endif %}
           </ul>
         </li>
         <li class="nav-item dropdown">

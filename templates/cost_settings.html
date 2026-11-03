@@ -1,0 +1,60 @@
+{% extends "base.html" %}{% block title %}Cost &amp; margin settings{% endblock %}
+{% block content %}
+<h3 class="mb-1">Cost &amp; margin settings</h3>
+<p class="text-muted mb-3">Your own running costs. They're used to show <b>our cost and margin</b> under every quote and on every job.
+  Customers never see these figures.</p>
+<div class="row g-3">
+  <div class="col-lg-7">
+    <form method="post" class="card p-4">
+      <h5>Fuel</h5>
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6"><label class="form-label">Diesel price (£ per litre)</label>
+          <input class="form-control" type="number" step="0.001" min="0" name="fuel_price_per_litre" value="{{ cs.fuel_price_per_litre }}">
+          <div class="form-text">Update this when the pump price changes.</div></div>
+        <div class="col-sm-6"><label class="form-label">Average fuel economy (mpg)</label>
+          <input class="form-control" type="number" step="0.1" min="0" name="mpg" value="{{ cs.mpg }}"></div>
+      </div>
+      <h5>Driver</h5>
+      <div class="row g-3 mb-3">
+        <div class="col-sm-4"><label class="form-label">Driver cost (£ per hour)</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="driver_rate_per_hour" value="{{ cs.driver_rate_per_hour }}"></div>
+        <div class="col-sm-4"><label class="form-label">Average speed (mph)</label>
+          <input class="form-control" type="number" step="1" min="0" name="avg_speed_mph" value="{{ cs.avg_speed_mph }}">
+          <div class="form-text">Turns miles into driving hours.</div></div>
+        <div class="col-sm-4"><label class="form-label">Loading / unloading per stop (min)</label>
+          <input class="form-control" type="number" step="1" min="0" name="stop_minutes" value="{{ cs.stop_minutes }}">
+          <div class="form-text">A normal job has 2 stops.</div></div>
+      </div>
+      <h5>Other costs <span class="text-muted small fw-normal">(optional, leave at 0 if not used)</span></h5>
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6"><label class="form-label">Other running costs (£ per mile)</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="other_cost_per_mile" value="{{ cs.other_cost_per_mile }}">
+          <div class="form-text">e.g. tyres, servicing, van lease or insurance spread per mile.</div></div>
+        <div class="col-sm-6"><label class="form-label">Fixed cost per job (£)</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="fixed_cost_per_job" value="{{ cs.fixed_cost_per_job }}">
+          <div class="form-text">e.g. admin, pallet wrap.</div></div>
+      </div>
+      <div><button class="btn btn-primary" type="submit">Save cost settings</button>
+        {% if cs.updated_at %}<span class="text-muted small ms-2">Last changed {{ cs.updated_at.strftime('%d %b %Y %H:%M') }}</span>{% endif %}</div>
+    </form>
+  </div>
+  <div class="col-lg-5">
+    <div class="card p-4">
+      <h5>Example with these figures</h5>
+      <p class="text-muted small">A 100-mile round trip with 2 stops:</p>
+      <table class="table table-sm">
+        {% for label, amount, detail in example.lines %}
+        <tr><td>{{ label }}{% if detail %}<div class="text-muted small">{{ detail }}</div>{% endif %}</td>
+          <td class="text-end">£{{ '%.2f'|format(amount) }}</td></tr>
+        {% endfor %}
+        <tr><th>Our cost</th><th class="text-end">£{{ '%.2f'|format(example.total) }}</th></tr>
+      </table>
+      <h6 class="mt-2">How a job's miles are worked out</h6>
+      <p class="small text-muted mb-0">Depot to the furthest stop and back, using the road miles in your rate card's postcode schedule
+        (e.g. SK13 = 42 mi each way, so 84 mi). Wavelength jobs use the round-trip miles typed on the booking.
+        You can change the miles on any quote or job if the real run is different.
+        This assumes the van does the job on its own, so if it shares the run with other drops, the real cost per job is lower.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

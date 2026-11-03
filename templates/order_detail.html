@@ -26,7 +26,13 @@
         <tr><th>Schedule</th><td>Collect {{ order.collection_date or '—' }} · Deliver {{ order.delivery_date or '—' }} · {{ order.timing }}</td></tr>
         <tr><th>Quoted price</th><td>£{{ '%.2f'|format(order.quoted_price or 0) }} inc VAT
           {% if order.price_net %}<span class="text-muted small">(£{{ '%.2f'|format(order.price_net) }} net + £{{ '%.2f'|format(order.price_vat or 0) }} VAT)</span>{% endif %}
-          {% if order.price_basis %}<div class="text-muted small">{{ order.price_basis }}</div>{% endif %}</td></tr>
+          {% if order.price_basis %}<div class="text-muted small">{{ order.price_basis }}</div>{% endif %}
+          {% if not order.invoiced and order.status != 'cancelled' %}
+          <form method="post" action="{{ url_for('order_reprice', order_id=order.id) }}" class="mt-1"
+                onsubmit="return confirm('Recalculate this job from the rate card? The quoted price will be replaced.');">
+            <button class="btn btn-sm btn-outline-secondary py-0" type="submit">Recalculate price</button>
+          </form>
+          {% endif %}</td></tr>
         {% if order.cod_amount %}
         <tr><th>Cash on delivery</th><td>£{{ '%.2f'|format(order.cod_amount) }} {% if order.cod_collected %}<span class="badge bg-success">Collected</span>{% else %}<span class="badge bg-secondary">Not yet collected</span>{% endif %}</td></tr>
         {% endif %}
@@ -39,6 +45,33 @@
           <span class="text-muted small">(sent automatically by SMS when a job goes "In Transit")</span></td></tr>
         <tr><th>Notes</th><td>{{ order.notes or '—' }}</td></tr>
       </table>
+    </div>
+
+    <div class="card p-3 mb-3" id="cost-margin">
+      <h5>Our cost &amp; margin <span class="text-muted small fw-normal">(internal, not shown to customers)</span></h5>
+      {% set cv = cost_view %}
+      <form method="post" action="{{ url_for('order_cost_miles', order_id=order.id) }}" class="d-flex flex-wrap align-items-center gap-2 mb-2 small">
+        <label for="estMiles" class="text-nowrap">Miles driven</label>
+        <input class="form-control form-control-sm" style="max-width:100px" type="number" min="0" step="1" id="estMiles" name="est_miles" value="{{ cv.miles if cv.miles is not none else '' }}">
+        <button class="btn btn-sm btn-outline-secondary py-0" type="submit">Update</button>
+        <span class="text-muted">{{ cv.note }}{% if cv.estimate is not none and cv.miles != cv.estimate %} · rate-card estimate {{ '%g'|format(cv.estimate) }} mi (clear the box and Update to go back){% endif %}</span>
+      </form>
+      {% if cv.cost %}
+      <table class="table table-sm mb-1">
+        {% for label, amount, detail in cv.cost.lines %}
+        <tr><td>{{ label }}{% if detail %}<div class="text-muted small">{{ detail }}</div>{% endif %}</td><td class="text-end">£{{ '%.2f'|format(amount) }}</td></tr>
+        {% endfor %}
+        <tr><th>Our cost</th><th class="text-end">£{{ '%.2f'|format(cv.cost.total) }}</th></tr>
+        {% if cv.margin %}
+        <tr><td>Net price (ex VAT{% if order.surcharges %}, inc surcharges{% endif %})</td><td class="text-end">£{{ '%.2f'|format(cv.margin.revenue) }}</td></tr>
+        <tr class="{{ 'table-success' if cv.margin.profit >= 0 else 'table-danger' }}"><th>Margin</th>
+          <th class="text-end">£{{ '%.2f'|format(cv.margin.profit) }}{% if cv.margin.pct is not none %} ({{ '%.1f'|format(cv.margin.pct) }}%){% endif %}</th></tr>
+        {% else %}
+        <tr><td colspan="2" class="text-muted small">No price on this job yet, so there's no margin to show.</td></tr>
+        {% endif %}
+      </table>
+      <p class="text-muted small mb-0">Uses your current cost settings{% if current_user.role == 'admin' %} (<a href="{{ url_for('cost_settings') }}">change</a>){% endif %} and assumes a dedicated run.</p>
+      {% endif %}
     </div>
 
     <div class="card p-3 mb-3">

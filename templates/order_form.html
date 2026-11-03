@@ -93,6 +93,7 @@
   <div class="mb-3"><label class="form-label">Package notes</label>
     <textarea class="form-control" name="notes" rows="2"></textarea></div>
   <div class="d-flex gap-2">
+    <input type="hidden" name="cost_miles" id="costMiles">
     <button type="button" class="btn btn-outline-primary" id="getQuoteBtn">Get quote</button>
     <button class="btn btn-primary" type="submit">Create Order</button>
   </div>
@@ -157,7 +158,42 @@ customerSelect.addEventListener("change", toggleModeFields);
 toggleModeFields();
 toggleMultidrop();
 
+function fmt(n) { return "£" + Number(n).toFixed(2); }
+function costBlock(c) {
+  if (!c) return "";
+  var h = '<div class="border-top pt-2 mt-2"><h6 class="mb-1">Our cost &amp; margin <span class="text-muted small fw-normal">(internal)</span></h6>';
+  h += '<div class="d-flex align-items-center gap-2 mb-1 small"><label for="costMilesBox" class="text-nowrap">Miles driven</label>' +
+       '<input type="number" min="0" step="1" id="costMilesBox" class="form-control form-control-sm" style="max-width:90px" value="' +
+       (c.miles != null ? c.miles : "") + '">' +
+       '<button type="button" class="btn btn-sm btn-outline-secondary py-0" id="costMilesApply">Update</button></div>';
+  h += '<div class="text-muted small mb-1">' + (c.note || "") + '</div>';
+  if (c.miles == null || !c.cost) return h + '</div>';
+  h += '<table class="table table-sm mb-1">';
+  c.cost.lines.forEach(function(l) {
+    h += '<tr><td>' + l[0] + (l[2] ? '<div class="text-muted small">' + l[2] + '</div>' : '') + '</td><td class="text-end">' + fmt(l[1]) + '</td></tr>';
+  });
+  h += '<tr><th>Our cost</th><th class="text-end">' + fmt(c.cost.total) + '</th></tr>';
+  if (c.margin) {
+    var good = c.margin.profit >= 0;
+    h += '<tr class="' + (good ? 'table-success' : 'table-danger') + '"><th>Margin</th><th class="text-end">' + fmt(c.margin.profit) +
+         (c.margin.pct != null ? ' (' + c.margin.pct.toFixed(1) + '%)' : '') + '</th></tr>';
+  }
+  h += '</table><div class="text-muted small">Margin = net price (ex VAT) minus our cost. Assumes a dedicated run.</div></div>';
+  return h;
+}
+function wireCostMiles() {
+  var btn = document.getElementById("costMilesApply"), box = document.getElementById("costMilesBox");
+  if (!btn || !box) return;
+  function apply() { document.getElementById("costMiles").value = box.value; getQuote(); }
+  btn.addEventListener("click", apply);
+  box.addEventListener("keydown", function(e) { if (e.key === "Enter") { e.preventDefault(); apply(); } });
+}
+// A fresh quote re-estimates the miles unless they were typed by hand.
 document.getElementById("getQuoteBtn").addEventListener("click", function() {
+  document.getElementById("costMiles").value = "";
+  getQuote();
+});
+function getQuote() {
   var full = 0, half = 0;
   document.querySelectorAll(".qty-row").forEach(function(row) {
     var val = parseInt(row.querySelector('[name="qty_value"]').value) || 0;
@@ -170,6 +206,7 @@ document.getElementById("getQuoteBtn").addEventListener("click", function() {
     customer_id: customerSelect.value,
     job_type: jobType.value,
     postcode: document.getElementById("deliveryPostcode").value,
+    collection_postcode: (document.querySelector('[name="collection_postcode"]') || {}).value,
     full: full, half: half,
     same_day: document.getElementById("timing").value === "same_day",
     delivery_date: (document.querySelector('[name="delivery_date"]') || {}).value,
@@ -177,6 +214,7 @@ document.getElementById("getQuoteBtn").addEventListener("click", function() {
     miles: (document.querySelector('[name="wl_miles"]') || {}).value,
     after6: (document.getElementById("after6") || {}).checked,
     manual_net: (document.querySelector('[name="manual_net"]') || {}).value,
+    cost_miles: document.getElementById("costMiles").value,
   };
   fetch("{{ url_for('api_quote') }}", {
     method: "POST", headers: {"Content-Type": "application/json"},
@@ -194,8 +232,11 @@ document.getElementById("getQuoteBtn").addEventListener("click", function() {
       '<table class="table table-sm">' + lines +
       '<tr><th>Net</th><td class="text-end">£' + q.net.toFixed(2) + '</td></tr>' +
       '<tr><th>VAT</th><td class="text-end">£' + q.vat.toFixed(2) + '</td></tr>' +
-      '<tr><th>Total</th><td class="text-end"><b>£' + q.total.toFixed(2) + '</b></td></tr></table>';
+      '<tr><th>Total</th><td class="text-end"><b>£' + q.total.toFixed(2) + '</b></td></tr></table>' +
+      costBlock(q.cost);
+    if (q.cost && q.cost.miles != null) document.getElementById("costMiles").value = q.cost.miles;
+    wireCostMiles();
   });
-});
+}
 </script>
 {% endblock %}

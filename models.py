@@ -76,6 +76,27 @@ class Vehicle(db.Model):
         return " - ".join(x for x in (size, self.vehicle_type) if x)
 
 
+class CostSettings(db.Model):
+    """Heliolink's own running-cost inputs for the margin view (one row, edited
+    on Billing -> Cost & margin settings). Never shown to customers."""
+    __tablename__ = "cost_settings"
+    id = db.Column(db.Integer, primary_key=True)
+    fuel_price_per_litre = db.Column(db.Float, default=1.83)
+    mpg = db.Column(db.Float, default=22.0)
+    driver_rate_per_hour = db.Column(db.Float, default=12.0)
+    avg_speed_mph = db.Column(db.Float, default=40.0)
+    stop_minutes = db.Column(db.Float, default=30.0)        # loading/unloading time per stop
+    other_cost_per_mile = db.Column(db.Float, default=0.0)  # tyres, servicing, insurance per mile, etc.
+    fixed_cost_per_job = db.Column(db.Float, default=0.0)
+    updated_at = db.Column(db.DateTime, default=now, onupdate=now)
+
+    FIELDS = ["fuel_price_per_litre", "mpg", "driver_rate_per_hour", "avg_speed_mph",
+              "stop_minutes", "other_cost_per_mile", "fixed_cost_per_job"]
+
+    def as_dict(self):
+        return {f: getattr(self, f) for f in self.FIELDS}
+
+
 class VehicleOption(db.Model):
     """The choices in the vehicle Size and Type dropdowns, managed on the Fleet page."""
     __tablename__ = "vehicle_options"
@@ -165,6 +186,8 @@ class Order(db.Model):
     wl_after6 = db.Column(db.Boolean, default=False)
     # Custom / multidrop manually-agreed net price
     manual_net = db.Column(db.Float)
+    # Our-cost view: miles we expect to drive for this job (estimated at booking, editable)
+    est_miles = db.Column(db.Float)
 
     collection_date = db.Column(db.Date)
     collection_time = db.Column(db.String(10))

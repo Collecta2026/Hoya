@@ -203,3 +203,134 @@ def price_custom(net, drops=0, multidrop=False):
     basis = "Multi-drop round" if multidrop else ("Custom - %d drops" % drops if drops > 1 else "Custom / bespoke")
     return {"ok": net > 0, "reason": None if net > 0 else "Enter the agreed price.",
             "net": net, "vat": vat, "total": net + vat, "lines": [(label, net, None)], "basis": basis}
+
+
+# ---------------------------------------------------------------------------
+# Our cost of running a job (for the margin view - never shown to customers)
+# ---------------------------------------------------------------------------
+# Representative one-way ROAD miles from the Riversway depot to each postcode
+# group, from the Sept 2026 rate card coverage schedule.
+# Each row: (area letters, district-from, district-to, one-way miles)
+ROAD_MILES = [
+    ('PR', 1, 9, 5),
+    ('PR', 25, 25, 5),
+    ('PR', 26, 26, 5),
+    ('BB', 1, 6, 13),
+    ('FY', 1, 8, 17),
+    ('WN', 1, 8, 21),
+    ('L', 37, 40, 22),
+    ('LA', 1, 6, 22),
+    ('BL', 1, 9, 23),
+    ('BB', 7, 12, 25),
+    ('BB', 18, 18, 25),
+    ('M', 1, 90, 33),
+    ('WA', 1, 16, 33),
+    ('L', 1, 36, 34),
+    ('BD', 23, 23, 38),
+    ('BD', 24, 24, 38),
+    ('OL', 1, 16, 40),
+    ('SK', 1, 23, 42),
+    ('LA', 7, 12, 47),
+    ('LA', 20, 23, 47),
+    ('BD', 1, 22, 48),
+    ('HX', 1, 7, 50),
+    ('HD', 1, 10, 50),
+    ('LS', 1, 29, 55),
+    ('CH', 1, 4, 57),
+    ('CH', 41, 66, 57),
+    ('CH', 5, 8, 62),
+    ('CW', 1, 12, 62),
+    ('LA', 13, 19, 62),
+    ('WF', 1, 17, 62),
+    ('HG', 1, 5, 68),
+    ('LL', 11, 20, 70),
+    ('ST', 1, 21, 72),
+    ('S', 1, 81, 75),
+    ('CA', 10, 17, 80),
+    ('LL', 21, 34, 85),
+    ('CA', 1, 9, 88),
+    ('DN', 1, 22, 88),
+    ('YO', 1, 62, 88),
+    ('CA', 18, 28, 95),
+    ('DL', 1, 17, 95),
+    ('TF', 1, 13, 95),
+    ('SY', 1, 25, 98),
+    ('DE', 13, 15, 100),
+    ('HU', 1, 20, 110),
+    ('WS', 1, 15, 110),
+    ('B', 77, 79, 112),
+    ('NE', 46, 49, 115),
+    ('DG', 1, 16, 118),
+    ('DH', 1, 9, 118),
+    ('TS', 1, 29, 118),
+    ('LL', 35, 49, 120),
+    ('LL', 50, 78, 128),
+    ('NE', 1, 45, 135),
+    ('NE', 61, 71, 135),
+    ('SR', 1, 8, 135),
+    ('TD', 1, 15, 165),
+    ('ML', 1, 12, 185),
+    ('KA', 1, 30, 190),
+    ('FK', 1, 21, 205),
+    ('EH', 1, 55, 215),
+    ('G', 1, 84, 215),
+    ('PA', 1, 19, 220),
+]
+
+LITRES_PER_GALLON = 4.546
+
+
+def _area_district(pc):
+    ow = outward_code(pc)
+    i = 0
+    while i < len(ow) and ow[i].isalpha():
+        i += 1
+    area, digits = ow[:i], ow[i:]
+    j = 0
+    while j < len(digits) and digits[j].isdigit():
+        j += 1
+    return (area, int(digits[:j])) if j else (area, None)
+
+
+def road_miles_for_postcode(pc):
+    """One-way road miles from the depot per the rate card, or None if not listed."""
+    area, dist = _area_district(pc)
+    if dist is None:
+        return None
+    for a, f, t, miles in ROAD_MILES:
+        if a == area and f <= dist <= t:
+            return miles
+    return None
+
+
+def cost_estimate(settings, miles, stops=2):
+    """Our cost of a job. settings: dict with fuel_price_per_litre, mpg,
+    driver_rate_per_hour, avg_speed_mph, stop_minutes, other_cost_per_mile,
+    fixed_cost_per_job. miles: total miles driven. stops: loading/unloading stops."""
+    g = lambda k: float(settings.get(k) or 0)
+    miles = max(0.0, float(miles or 0))
+    drive_h = miles / g("avg_speed_mph") if g("avg_speed_mph") else 0.0
+    stop_h = max(0, int(stops or 0)) * g("stop_minutes") / 60.0
+    hours = drive_h + stop_h
+    fuel = (miles / g("mpg") * LITRES_PER_GALLON * g("fuel_price_per_litre")) if g("mpg") else 0.0
+    driver = hours * g("driver_rate_per_hour")
+    lines = [
+        ("Fuel", fuel, "%.0f mi / %g mpg x £%.2f/L" % (miles, g("mpg"), g("fuel_price_per_litre"))),
+        ("Driver", driver, "%.1f h x £%.2f/h (%.1f h driving + %d stop(s) x %g min)"
+         % (hours, g("driver_rate_per_hour"), drive_h, stops, g("stop_minutes"))),
+    ]
+    if g("other_cost_per_mile"):
+        lines.append(("Other running costs", miles * g("other_cost_per_mile"), "£%.2f/mi" % g("other_cost_per_mile")))
+    if g("fixed_cost_per_job"):
+        lines.append(("Fixed cost per job", g("fixed_cost_per_job"), None))
+    total = sum(l[1] for l in lines)
+    return {"miles": round(miles, 1), "hours": round(hours, 2), "stops": stops,
+            "lines": [(a, round(b, 2), c) for a, b, c in lines], "total": round(total, 2)}
+
+
+def margin(net, cost):
+    """Profit on the job's net price (ex VAT, inc fuel surcharge & extras)."""
+    net, cost = float(net or 0), float(cost or 0)
+    profit = net - cost
+    return {"revenue": round(net, 2), "cost": round(cost, 2), "profit": round(profit, 2),
+            "pct": round(profit / net * 100, 1) if net else None}

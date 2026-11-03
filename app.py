@@ -23,9 +23,9 @@ from flask_login import (LoginManager, login_user, logout_user, login_required,
 
 from models import (db, User, Driver, Vehicle, Customer, Order, OrderBox,
                      OrderEvent, ProofOfDelivery, Zone, RateSettings,
-                     Surcharge, OrderSurcharge, Invoice, OrderDrop, VehicleOption)
+                     Surcharge, OrderSurcharge, Invoice, OrderDrop, VehicleOption, CostSettings)
 from optimise import optimise_stops, region_of
-from rates import quote_for_order, TIERS
+from rates import quote_for_order, TIERS, _UK as rates_uk_tz, estimate_job_miles
 import pricing
 from emailer import send_email, SALES_EMAIL
 
@@ -110,6 +110,31 @@ DEPOT_POSTCODE = os.environ.get("DEPOT_POSTCODE", "PR2 2TE")  # Riversway, Prest
 def gen_reference():
     return "HL-" + datetime.utcnow().strftime("%y%m%d") + "-" + "".join(
         random.choices(string.ascii_uppercase + string.digits, k=4))
+
+
+def get_cost_settings():
+    cs = CostSettings.query.first()
+    if not cs:
+        cs = CostSettings()
+        db.session.add(cs)
+        db.session.commit()
+    return cs
+
+
+def job_cost_view(job, mode, net, miles=None):
+    """Our cost + margin for a quote or saved job. miles=None -> use the
+    job's saved est_miles, else the rate-card estimate."""
+    est, note, stops = estimate_job_miles(job, mode)
+    if miles is None:
+        miles = getattr(job, "est_miles", None)
+    edited = miles is not None and (est is None or abs(float(miles) - est) > 0.01)
+    if miles is None:
+        miles = est
+    if miles is None:
+        return {"miles": None, "note": note, "estimate": None}
+    cost = pricing.cost_estimate(get_cost_settings().as_dict(), miles, stops)
+    return {"miles": cost["miles"], "estimate": est, "note": ("miles adjusted by hand" if edited else note),
+            "cost": cost, "margin": pricing.margin(net, cost["total"]) if net else None}
 
 
 def gen_password():
@@ -487,8 +512,14 @@ def register_routes(app):
             wl_after6=form.get("wl_after6") == "on",
             manual_net=float(form.get("manual_net")) if form.get("manual_net") else None,
         )
+        try:
+            order.est_miles = float(form["cost_miles"]) if form.get("cost_miles") else None
+        except ValueError:
+            order.est_miles = None
         db.session.add(order)
         db.session.flush()
+        if order.est_miles is None:
+            order.est_miles = estimate_job_miles(order, customer.pricing_mode if customer else None)[0]
         log_event(order, "pending", "Order created")
 
         parcel_count = order.parcels or 0
@@ -531,7 +562,10 @@ def register_routes(app):
         surcharges = Surcharge.query.all()
         drivers = Driver.query.order_by(Driver.name).all()
         vehicles = Vehicle.query.order_by(Vehicle.registration).all()
-        return render_template("order_detail.html", order=order, surcharges=surcharges,
+        extras = sum(s.amount for s in order.surcharges)
+        cost_view = job_cost_view(order, order.customer.pricing_mode if order.customer else None,
+                                  (order.price_net or 0) + extras)
+        return render_template("order_detail.html", order=order, surcharges=surcharges, cost_view=cost_view,
                                 status_labels=STATUS_LABELS, statuses=STATUSES,
                                 drivers=drivers, vehicles=vehicles)
 
@@ -630,6 +664,81 @@ def register_routes(app):
             db.session.commit()
             flash("Surcharge removed.", "success")
         return redirect(url_for("order_detail", order_id=order_id))
+
+    @app.route("/orders/<int:order_id>/cost-miles", methods=["POST"])
+    @login_required
+    def order_cost_miles(order_id):
+        require_role("admin", "dispatcher")
+        order = Order.query.get_or_404(order_id)
+        raw = (request.form.get("est_miles") or "").strip()
+        if raw == "":
+            order.est_miles = estimate_job_miles(order, order.customer.pricing_mode if order.customer else None)[0]
+            msg = "Miles reset to the rate-card estimate."
+        else:
+            try:
+                order.est_miles = max(0.0, float(raw))
+            except ValueError:
+                flash("Enter miles as a number.", "error")
+                return redirect(url_for("order_detail", order_id=order.id))
+            msg = f"Miles for cost set to {order.est_miles:g}."
+        db.session.commit()
+        flash(msg, "success")
+        return redirect(url_for("order_detail", order_id=order.id))
+
+    @app.route("/settings/costs", methods=["GET", "POST"])
+    @login_required
+    def cost_settings():
+        require_role("admin")
+        cs = get_cost_settings()
+        if request.method == "POST":
+            bad = []
+            for f in CostSettings.FIELDS:
+                raw = (request.form.get(f) or "").strip()
+                try:
+                    val = float(raw)
+                    if val < 0:
+                        raise ValueError
+                    setattr(cs, f, val)
+                except ValueError:
+                    bad.append(f.replace("_", " "))
+            if bad:
+                db.session.rollback()
+                flash("Please enter a number (0 or more) for: " + ", ".join(bad), "error")
+            else:
+                db.session.commit()
+                flash("Cost settings saved - margins everywhere now use these figures.", "success")
+            return redirect(url_for("cost_settings"))
+        example = pricing.cost_estimate(cs.as_dict(), 100, 2)
+        return render_template("cost_settings.html", cs=cs, example=example)
+
+    @app.route("/orders/<int:order_id>/reprice", methods=["POST"])
+    @login_required
+    def order_reprice(order_id):
+        """Re-run the rate card on a saved job (e.g. after a pricing fix or a
+        changed postcode). Uses the time the job was booked for the same-day
+        late-notice rule, not the time the button is pressed."""
+        require_role("admin", "dispatcher")
+        order = Order.query.get_or_404(order_id)
+        if order.invoiced or order.status == "cancelled":
+            flash("Invoiced or cancelled jobs can't be re-priced.", "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        booked = order.created_at
+        if booked is not None and booked.tzinfo is None:
+            from datetime import timezone
+            booked = booked.replace(tzinfo=timezone.utc)
+        if booked is not None and rates_uk_tz is not None:
+            booked = booked.astimezone(rates_uk_tz)
+        q = quote_for_order(order, order.customer, now=booked)
+        if not q.get("ok"):
+            flash("Couldn't re-price: " + (q.get("reason") or "unknown reason"), "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        old = order.price_net
+        order.price_net, order.price_vat = round(q["net"], 2), round(q["vat"], 2)
+        order.quoted_price, order.price_basis = round(q["total"], 2), q["basis"]
+        log_event(order, order.status, "Re-priced: £%.2f -> £%.2f net (%s)" % (old or 0, order.price_net, q["basis"]))
+        db.session.commit()
+        flash("Re-priced: £%.2f → £%.2f net + VAT. %s" % (old or 0, order.price_net, " ".join(q.get("notes") or [])), "success")
+        return redirect(url_for("order_detail", order_id=order.id))
 
     @app.route("/orders/<int:order_id>/cancel", methods=["POST"])
     @login_required
@@ -1568,9 +1677,10 @@ def register_routes(app):
         class Stub:
             pass
         stub = Stub()
-        stub.job_type = "multidrop" if str(data.get("job_type")) == "multidrop" else "delivery"
+        jt = str(data.get("job_type") or "delivery")
+        stub.job_type = jt if jt in ("delivery", "collection", "both", "multidrop") else "delivery"
         stub.delivery_postcode = data.get("postcode", "")
-        stub.collection_postcode = data.get("postcode", "")
+        stub.collection_postcode = data.get("collection_postcode", "")
         stub.full_pallets = int(data.get("full") or 0)
         stub.half_pallets = int(data.get("half") or 0)
         stub.pallets = stub.full_pallets + stub.half_pallets
@@ -1590,6 +1700,13 @@ def register_routes(app):
         sc.discount_pct = customer.discount_pct if customer else 0
         sc.flat_rate_per_pallet = customer.flat_rate_per_pallet if customer else 25
         q = quote_for_order(stub, sc)
+        if q.get("ok"):
+            try:
+                cm = data.get("cost_miles")
+                q["cost"] = job_cost_view(stub, sc.pricing_mode, q["net"],
+                                           miles=float(cm) if cm not in (None, "") else None)
+            except Exception as exc:  # never let the cost view break quoting
+                q["cost"] = {"miles": None, "note": "cost estimate unavailable (%s)" % exc}
         return jsonify(q)
 
     @app.route("/invoices")
@@ -1800,6 +1917,8 @@ def seed_if_needed():
         for name, amount, is_pct in default_surcharges:
             db.session.add(Surcharge(name=name, default_amount=amount, is_percent=is_pct))
 
+    if not CostSettings.query.first():
+        db.session.add(CostSettings())   # £1.83/L, 22 mpg, £12/h driver, 40 mph, 30 min per stop
     if not VehicleOption.query.filter_by(kind="size").first():
         db.session.add(VehicleOption(kind="size", label="3.5t", sort_order=1))
     if not VehicleOption.query.filter_by(kind="type").first():

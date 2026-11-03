@@ -37,11 +37,11 @@
     <div class="card p-3">
       <h5>Vehicles</h5>
       <table class="table table-sm">
-        <thead><tr><th>Reg</th><th>Size</th><th>Capacity</th><th>Status</th></tr></thead>
+        <thead><tr><th>Reg</th><th>Vehicle</th><th>Capacity</th><th>Status</th></tr></thead>
         <tbody>
         {% for v in vehicles %}
         <tr>
-          <td>{{ v.registration }}</td><td>{{ v.size }}</td><td>{{ v.capacity_pallets }} pallets</td>
+          <td>{{ v.registration }}</td><td>{{ v.label or '—' }}</td><td>{{ v.capacity_pallets }} pallets</td>
           <td>
             <form method="post" action="{{ url_for('vehicle_set_status', vehicle_id=v.id) }}" class="d-inline">
               <select name="status" class="form-select form-select-sm d-inline w-auto" onchange="this.form.submit()">
@@ -55,17 +55,7 @@
         {% endfor %}
         </tbody>
       </table>
-      <form method="post" action="{{ url_for('vehicle_new') }}" class="row g-2 mt-2">
-        <div class="col-5"><input class="form-control form-control-sm" name="registration" placeholder="Registration" required></div>
-        <div class="col-4">
-          <select class="form-select form-select-sm" name="size">
-            <option value="panel_van">Panel Van</option>
-            <option value="2.5t">2.5t</option>
-            <option value="7.5t">7.5t</option>
-          </select>
-        </div>
-        <div class="col-3"><button class="btn btn-sm btn-primary w-100" type="submit">Add vehicle</button></div>
-      </form>
+      <a class="btn btn-sm btn-outline-primary mt-2" href="{{ url_for('fleet') }}">Add or edit vehicles on the Fleet page</a>
     </div>
   </div>
 </div>

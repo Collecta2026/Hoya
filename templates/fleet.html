@@ -1,5 +1,18 @@
 {% extends "base.html" %}{% block title %}Fleet{% endblock %}
-{% set size_labels = {'panel_van': 'Panel Van', '2.5t': '2.5t', '7.5t': '7.5t'} %}
+{# Size and Type dropdowns come from the editable lists at the bottom of this page #}
+{% macro size_select(current) %}
+  <select class="form-select form-select-sm" name="size">
+    {% for s in size_options %}<option value="{{ s }}" {% if s==current %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    {% if current and current not in size_options %}<option value="{{ current }}" selected>{{ current }} (not in list)</option>{% endif %}
+  </select>
+{% endmacro %}
+{% macro type_select(current) %}
+  <select class="form-select form-select-sm" name="vehicle_type">
+    <option value="">— Type —</option>
+    {% for t in type_options %}<option value="{{ t }}" {% if t==current %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    {% if current and current not in type_options %}<option value="{{ current }}" selected>{{ current }} (not in list)</option>{% endif %}
+  </select>
+{% endmacro %}
 {% block content %}
 <h3 class="mb-3">Fleet — Drivers &amp; Vehicles</h3>
 <div class="row g-3">
@@ -79,11 +92,11 @@
     <div class="card p-3">
       <h5>Vehicles</h5>
       <table class="table table-sm align-middle">
-        <thead><tr><th>Reg</th><th>Size</th><th>Capacity</th><th>Status</th><th class="text-end"></th></tr></thead>
+        <thead><tr><th>Reg</th><th>Vehicle</th><th>Capacity</th><th>Status</th><th class="text-end"></th></tr></thead>
         <tbody>
         {% for v in vehicles %}
         <tr>
-          <td>{{ v.registration }}</td><td>{{ size_labels.get(v.size, v.size) }}</td><td>{{ v.capacity_pallets }} pallets</td>
+          <td>{{ v.registration }}</td><td>{{ v.label or '—' }}</td><td>{{ v.capacity_pallets }} pallets</td>
           <td>
             <form method="post" action="{{ url_for('vehicle_set_status', vehicle_id=v.id) }}" class="d-inline">
               <select name="status" class="form-select form-select-sm d-inline w-auto" onchange="this.form.submit()">
@@ -106,13 +119,11 @@
             <form method="post" action="{{ url_for('vehicle_edit', vehicle_id=v.id) }}" class="row g-2 py-1">
               <div class="col-sm-4"><label class="form-label small mb-0">Registration</label>
                 <input class="form-control form-control-sm" name="registration" value="{{ v.registration }}" required style="text-transform:uppercase"></div>
-              <div class="col-sm-3"><label class="form-label small mb-0">Size</label>
-                <select class="form-select form-select-sm" name="size">
-                  {% for key, label in size_labels.items() %}<option value="{{ key }}" {% if v.size==key %}selected{% endif %}>{{ label }}</option>{% endfor %}
-                </select></div>
-              <div class="col-sm-3"><label class="form-label small mb-0">Capacity (pallets)</label>
+              <div class="col-sm-3"><label class="form-label small mb-0">Size</label>{{ size_select(v.size) }}</div>
+              <div class="col-sm-5"><label class="form-label small mb-0">Type</label>{{ type_select(v.vehicle_type) }}</div>
+              <div class="col-sm-4"><label class="form-label small mb-0">Capacity (pallets)</label>
                 <input class="form-control form-control-sm" type="number" min="1" name="capacity_pallets" value="{{ v.capacity_pallets }}"></div>
-              <div class="col-sm-2"><label class="form-label small mb-0">MPG</label>
+              <div class="col-sm-3"><label class="form-label small mb-0">MPG</label>
                 <input class="form-control form-control-sm" type="number" step="0.1" name="mpg" value="{{ v.mpg or '' }}"></div>
               <div class="col-12 d-flex gap-2">
                 <button class="btn btn-sm btn-primary" type="submit">Save vehicle</button>
@@ -129,15 +140,44 @@
       <h6 class="mt-2">Add vehicle</h6>
       <form method="post" action="{{ url_for('vehicle_new') }}" class="row g-2">
         <div class="col-sm-4"><input class="form-control form-control-sm" name="registration" placeholder="Registration" required style="text-transform:uppercase"></div>
-        <div class="col-sm-4">
-          <select class="form-select form-select-sm" name="size" id="newVehicleSize">
-            {% for key, label in size_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="col-sm-4"><input class="form-control form-control-sm" type="number" min="1" name="capacity_pallets" id="newVehicleCap" placeholder="Capacity (pallets)"></div>
-        <div class="col-12"><button class="btn btn-sm btn-primary" type="submit">Add vehicle</button>
-          <span class="text-muted small ms-2">Leave capacity blank to use the size default (Panel Van 4 · 2.5t 8 · 7.5t 16).</span></div>
+        <div class="col-sm-3">{{ size_select(None) }}</div>
+        <div class="col-sm-5">{{ type_select(None) }}</div>
+        <div class="col-sm-4"><input class="form-control form-control-sm" type="number" min="1" name="capacity_pallets" placeholder="Capacity (pallets)"></div>
+        <div class="col-sm-8"><button class="btn btn-sm btn-primary" type="submit">Add vehicle</button>
+          <span class="text-muted small ms-2">Capacity blank = 4 pallets.</span></div>
       </form>
+    </div>
+
+    <!-- ===================== EDITABLE SIZE / TYPE LISTS ===================== -->
+    <div class="card p-3 mt-3" id="vehicle-options">
+      <h5>Vehicle sizes &amp; types</h5>
+      <p class="text-muted small mb-2">These are the choices in the Size and Type dropdowns above. Add new ones as the fleet grows.
+        An option can only be removed once no vehicle uses it.</p>
+      <div class="row g-3">
+        {% for kind, title, ph, maxlen in [('size', 'Sizes', 'e.g. 7.5t', 20), ('type', 'Types', 'e.g. Curtainsider', 80)] %}
+        <div class="col-sm-6">
+          <h6 class="mb-1">{{ title }}</h6>
+          <ul class="list-group list-group-flush mb-2">
+            {% for o in option_rows if o.kind == kind %}
+            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-1">
+              <span>{{ o.label }}</span>
+              <form method="post" action="{{ url_for('vehicle_option_delete', option_id=o.id) }}" class="d-inline"
+                    onsubmit="return confirm('Remove {{ o.label }} from the list?');">
+                <button class="btn btn-sm btn-link text-danger p-0" type="submit" title="Remove">✕</button>
+              </form>
+            </li>
+            {% else %}
+            <li class="list-group-item px-0 py-1 text-muted small">None yet</li>
+            {% endfor %}
+          </ul>
+          <form method="post" action="{{ url_for('vehicle_option_add') }}" class="d-flex gap-1">
+            <input type="hidden" name="kind" value="{{ kind }}">
+            <input class="form-control form-control-sm" name="label" placeholder="{{ ph }}" maxlength="{{ maxlen }}" required>
+            <button class="btn btn-sm btn-outline-primary text-nowrap" type="submit">Add</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
     </div>
   </div>
 </div>

@@ -2,42 +2,27 @@
 {% block content %}
 <h3 class="mb-3">Customers</h3>
 <div class="row g-3">
-  <div class="col-md-7">
+  <div class="col-lg-7">
     <div class="card p-3">
       <table class="table table-sm align-middle">
         <thead><tr><th>Name</th><th>Pricing</th><th>Portal login</th><th></th></tr></thead>
         <tbody>
         {% for c in customers %}
         {% set u = portal_users.get(c.id) %}
+        {% set is_flat = c.pricing_mode == 'flat' %}
         <tr>
-          <td>{{ c.name }}{% if c.main_product %}<div class="text-muted small">{{ c.main_product }}</div>{% endif %}</td>
+          <td>
+            <b>{{ c.name }}</b>
+            {% if c.main_product %}<div class="text-muted small">{{ c.main_product }}</div>{% endif %}
+            {% if c.email or c.phone %}<div class="text-muted small">{{ c.email or '' }}{% if c.email and c.phone %} · {% endif %}{{ c.phone or '' }}</div>{% endif %}
+          </td>
           <td>
             <div class="small">
-              {% if c.pricing_mode == 'pallet' %}Pallet rate card &middot; {{ c.tier }} tier
-              {% elif c.pricing_mode == 'wavelength' %}Wavelength (events/distance)
+              {% if c.pricing_mode == 'wavelength' %}Wavelength (events/distance)
               {% elif c.pricing_mode == 'custom' %}Custom / bespoke
-              {% else %}Flat £{{ '%.2f'|format(c.flat_rate_per_pallet) }}/pallet{% endif %}
+              {% elif is_flat %}<span class="text-danger">Legacy flat £{{ '%.2f'|format(c.flat_rate_per_pallet or 0) }}/pallet — switch to rate card</span>
+              {% else %}Pallet rate card &middot; {{ c.tier }} tier{% endif %}
               {% if c.discount_pct %}&middot; -{{ c.discount_pct }}%{% endif %}
-            </div>
-            <button class="btn btn-sm btn-outline-secondary mt-1" type="button" data-bs-toggle="collapse" data-bs-target="#pricing-{{ c.id }}">Edit pricing</button>
-            <div class="collapse mt-2" id="pricing-{{ c.id }}">
-              <form method="post" action="{{ url_for('customer_pricing_set', customer_id=c.id) }}">
-                <input class="form-control form-control-sm mb-1" name="main_product" placeholder="Main product" value="{{ c.main_product or '' }}">
-                <select class="form-select form-select-sm mb-1" name="pricing_mode">
-                  <option value="pallet" {% if c.pricing_mode=='pallet' %}selected{% endif %}>Pallet rate card</option>
-                  <option value="wavelength" {% if c.pricing_mode=='wavelength' %}selected{% endif %}>Wavelength (events/distance)</option>
-                  <option value="custom" {% if c.pricing_mode=='custom' %}selected{% endif %}>Custom / bespoke</option>
-                  <option value="flat" {% if c.pricing_mode=='flat' %}selected{% endif %}>Flat £ per pallet</option>
-                </select>
-                <select class="form-select form-select-sm mb-1" name="tier">
-                  {% for t in tiers %}<option value="{{ t }}" {% if c.tier==t %}selected{% endif %}>{{ t }} tier</option>{% endfor %}
-                </select>
-                <div class="d-flex gap-1 mb-1">
-                  <input type="number" step="0.1" class="form-control form-control-sm" name="discount_pct" placeholder="Discount %" value="{{ c.discount_pct }}">
-                  <input type="number" step="0.01" class="form-control form-control-sm" name="flat_rate_per_pallet" placeholder="Flat £/pallet" value="{{ c.flat_rate_per_pallet }}">
-                </div>
-                <button class="btn btn-sm btn-primary" type="submit">Save pricing</button>
-              </form>
             </div>
           </td>
           <td>
@@ -52,7 +37,8 @@
             <div class="collapse mt-2" id="portal-{{ c.id }}">
               <form method="post" action="{{ url_for('customer_portal_set', customer_id=c.id) }}" class="mb-1">
                 <input class="form-control form-control-sm mb-1" name="portal_email" placeholder="Login email" value="{{ u.email if u else '' }}" required>
-                <input class="form-control form-control-sm mb-1" name="portal_password" placeholder="New password (leave blank for changeme123)">
+                <input class="form-control form-control-sm mb-1" name="portal_password"
+                       placeholder="{{ 'New password (blank = keep current)' if u else 'Password (blank = generate one)' }}">
                 <button class="btn btn-sm btn-primary" type="submit">Save login</button>
               </form>
               {% if u %}
@@ -62,48 +48,84 @@
               {% endif %}
             </div>
           </td>
-          <td><a class="btn btn-sm btn-primary" href="{{ url_for('order_new', customer_id=c.id) }}">Place order</a></td>
+          <td class="text-end text-nowrap">
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#edit-{{ c.id }}">Edit</button>
+            <a class="btn btn-sm btn-primary" href="{{ url_for('order_new', customer_id=c.id) }}">Place order</a>
+          </td>
         </tr>
+        <tr class="collapse" id="edit-{{ c.id }}">
+          <td colspan="4" class="bg-light">
+            <form method="post" action="{{ url_for('customer_pricing_set', customer_id=c.id) }}" class="row g-2 py-1">
+              <div class="col-sm-6"><label class="form-label small mb-0">Company name</label>
+                <input class="form-control form-control-sm" name="name" value="{{ c.name }}" required></div>
+              <div class="col-sm-6"><label class="form-label small mb-0">Main product</label>
+                <input class="form-control form-control-sm" name="main_product" value="{{ c.main_product or '' }}" placeholder="e.g. Confectionery"></div>
+              <div class="col-sm-6"><label class="form-label small mb-0">Email</label>
+                <input class="form-control form-control-sm" name="email" value="{{ c.email or '' }}"></div>
+              <div class="col-sm-6"><label class="form-label small mb-0">Phone</label>
+                <input class="form-control form-control-sm" name="phone" value="{{ c.phone or '' }}"></div>
+              <div class="col-12"><label class="form-label small mb-0">Billing address</label>
+                <input class="form-control form-control-sm" name="billing_address" value="{{ c.billing_address or '' }}"></div>
+              <div class="col-sm-5"><label class="form-label small mb-0">Pricing</label>
+                <select class="form-select form-select-sm" name="pricing_mode">
+                  <option value="pallet" {% if c.pricing_mode not in ('wavelength','custom','flat') %}selected{% endif %}>Pallet rate card</option>
+                  <option value="wavelength" {% if c.pricing_mode=='wavelength' %}selected{% endif %}>Wavelength (events/distance)</option>
+                  <option value="custom" {% if c.pricing_mode=='custom' %}selected{% endif %}>Custom / bespoke</option>
+                  {% if is_flat %}<option value="flat" selected>Legacy flat rate (old)</option>{% endif %}
+                </select></div>
+              <div class="col-sm-4"><label class="form-label small mb-0">Account tier</label>
+                <select class="form-select form-select-sm" name="tier">
+                  {% for t in tiers %}<option value="{{ t }}" {% if c.tier==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+                </select></div>
+              <div class="col-sm-3"><label class="form-label small mb-0">Discount %</label>
+                <input type="number" step="0.1" class="form-control form-control-sm" name="discount_pct" value="{{ c.discount_pct or 0 }}"></div>
+              {% if is_flat %}
+              <div class="col-sm-4"><label class="form-label small mb-0">Legacy flat £/pallet</label>
+                <input type="number" step="0.01" class="form-control form-control-sm" name="flat_rate_per_pallet" value="{{ c.flat_rate_per_pallet }}"></div>
+              <div class="col-sm-8 small text-muted align-self-end">This customer is on the old flat rate. Choose "Pallet rate card" above and save to move them onto your Sept 2026 rate card.</div>
+              {% endif %}
+              <div class="col-12 d-flex gap-2">
+                <button class="btn btn-sm btn-primary" type="submit">Save customer</button>
+                <button class="btn btn-sm btn-link" type="button" data-bs-toggle="collapse" data-bs-target="#edit-{{ c.id }}">Cancel</button>
+              </div>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted small">No customers yet — add one on the right.</td></tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
-  <div class="col-md-5">
+  <div class="col-lg-5">
     <div class="card p-3">
       <h5>Add customer</h5>
       <form method="post" action="{{ url_for('customer_new') }}">
-        <div class="mb-2"><label class="form-label">Name</label><input class="form-control" name="name" required></div>
-        <div class="mb-2"><label class="form-label">Email</label><input class="form-control" name="email"></div>
-        <div class="mb-2"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
+        <div class="mb-2"><label class="form-label">Company name</label><input class="form-control" name="name" required></div>
+        <div class="row g-2 mb-2">
+          <div class="col-sm-6"><label class="form-label">Email</label><input class="form-control" name="email"></div>
+          <div class="col-sm-6"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
+        </div>
         <div class="mb-2"><label class="form-label">Billing address</label><input class="form-control" name="billing_address"></div>
-        <div class="mb-2"><label class="form-label">Main product</label><input class="form-control" name="main_product" placeholder="e.g. Confectionery"></div>
-        <div class="mb-2"><label class="form-label">Pricing mode</label>
-          <select class="form-select" name="pricing_mode" id="pm">
-            <option value="pallet">Pallet rate card (postcode band + tier)</option>
-            <option value="wavelength">Wavelength (events/distance)</option>
-            <option value="custom">Custom / bespoke</option>
-            <option value="flat">Flat rate per pallet (legacy)</option>
-          </select>
+        <div class="mb-2"><label class="form-label">Main product <span class="text-muted small">(auto-fills bookings)</span></label><input class="form-control" name="main_product" placeholder="e.g. Confectionery"></div>
+        <div class="row g-2 mb-2">
+          <div class="col-sm-7"><label class="form-label">Pricing</label>
+            <select class="form-select" name="pricing_mode">
+              <option value="pallet">Pallet rate card (postcode band + tier)</option>
+              <option value="wavelength">Wavelength (events/distance)</option>
+              <option value="custom">Custom / bespoke</option>
+            </select></div>
+          <div class="col-sm-5"><label class="form-label">Account tier</label>
+            <select class="form-select" name="tier">
+              {% for t in tiers %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+            </select></div>
         </div>
-        <div class="mb-2"><label class="form-label">Account tier (pallet mode)</label>
-          <select class="form-select" name="tier">
-            {% for t in tiers %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="mb-2"><label class="form-label">Discount %</label>
+        <div class="mb-2"><label class="form-label">Extra discount % <span class="text-muted small">(usually 0 — the tier already sets the price)</span></label>
           <input type="number" step="0.1" class="form-control" name="discount_pct" value="0"></div>
-        <div class="mb-2"><label class="form-label">Flat £ per pallet (flat mode)</label>
-          <input type="number" step="0.01" class="form-control" name="flat_rate_per_pallet" value="25"></div>
-        <div class="mb-2"><label class="form-label">Zone</label>
-          <select class="form-select" name="zone_id">
-            <option value="">None</option>
-            {% for z in zones %}<option value="{{ z.id }}">{{ z.name }}</option>{% endfor %}
-          </select>
-        </div>
         <hr>
         <div class="mb-2"><label class="form-label">Portal login email (optional)</label><input class="form-control" name="portal_email"></div>
-        <div class="mb-2"><label class="form-label">Portal password</label><input class="form-control" name="portal_password" placeholder="changeme123"></div>
+        <div class="mb-2"><label class="form-label">Portal password</label><input class="form-control" name="portal_password" placeholder="Leave blank to generate one"></div>
         <button class="btn btn-primary" type="submit">Add customer</button>
       </form>
     </div>

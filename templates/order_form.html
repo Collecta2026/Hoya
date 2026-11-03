@@ -172,6 +172,7 @@ document.getElementById("getQuoteBtn").addEventListener("click", function() {
     postcode: document.getElementById("deliveryPostcode").value,
     full: full, half: half,
     same_day: document.getElementById("timing").value === "same_day",
+    delivery_date: (document.querySelector('[name="delivery_date"]') || {}).value,
     vehicle: (document.querySelector('[name="wl_vehicle"]') || {}).value,
     miles: (document.querySelector('[name="wl_miles"]') || {}).value,
     after6: (document.getElementById("after6") || {}).checked,
@@ -182,11 +183,14 @@ document.getElementById("getQuoteBtn").addEventListener("click", function() {
     body: JSON.stringify(payload)
   }).then(r => r.json()).then(function(q) {
     var box = document.getElementById("quoteResult");
-    if (!q.ok) { box.innerHTML = '<p class="text-danger small">' + (q.reason || "Can't price this yet.") + '</p>'; return; }
+    if (!q.ok) { box.innerHTML = '<div class="alert alert-warning small mb-0">' + (q.reason || "Can't price this yet.") + '</div>'; return; }
     var lines = (q.lines || []).map(function(l) {
       return '<tr><td>' + l[0] + '</td><td class="text-end">£' + l[1].toFixed(2) + '</td></tr>';
     }).join("");
-    box.innerHTML = '<p class="small text-muted">' + q.basis + '</p>' +
+    var notes = (q.notes || []).map(function(n) {
+      return '<div class="alert alert-warning py-1 px-2 small mb-2">' + n + '</div>';
+    }).join("");
+    box.innerHTML = notes + '<p class="small text-muted">' + q.basis + '</p>' +
       '<table class="table table-sm">' + lines +
       '<tr><th>Net</th><td class="text-end">£' + q.net.toFixed(2) + '</td></tr>' +
       '<tr><th>VAT</th><td class="text-end">£' + q.vat.toFixed(2) + '</td></tr>' +

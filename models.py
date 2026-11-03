@@ -57,14 +57,32 @@ class Vehicle(db.Model):
     __tablename__ = "vehicles"
     id = db.Column(db.Integer, primary_key=True)
     registration = db.Column(db.String(20), nullable=False)
-    size = db.Column(db.String(20), nullable=False, default="panel_van")  # panel_van | 2.5t | 7.5t
+    size = db.Column(db.String(20), nullable=False, default="3.5t")  # weight class, e.g. 3.5t (list editable on the Fleet page)
+    vehicle_type = db.Column(db.String(80))   # body type, e.g. Panel Van / Box Luton with tail-lift (editable list)
     capacity_pallets = db.Column(db.Integer, nullable=False, default=4)
-    mpg = db.Column(db.Float, default=30.0)
+    mpg = db.Column(db.Float, default=22.0)
     status = db.Column(db.String(20), nullable=False, default="available")  # available | on_route | off_road
     created_at = db.Column(db.DateTime, default=now)
 
-    SIZE_CAPACITY = {"panel_van": 4, "2.5t": 8, "7.5t": 16}
-    SIZE_MPG_DEFAULT = {"panel_van": 34.0, "2.5t": 22.0, "7.5t": 14.0}
+    # Fallbacks only, used when capacity/MPG are left blank on the add form
+    SIZE_CAPACITY = {"panel_van": 4, "2.5t": 8, "3.5t": 4, "7.5t": 16}
+    SIZE_MPG_DEFAULT = {"panel_van": 34.0, "2.5t": 22.0, "3.5t": 22.0, "7.5t": 14.0}
+    SIZE_LABELS = {"panel_van": "Panel Van"}   # pre-Nov-2026 value
+
+    @property
+    def label(self):
+        """e.g. '3.5t - Box Luton with tail-lift'"""
+        size = self.SIZE_LABELS.get(self.size, self.size or "")
+        return " - ".join(x for x in (size, self.vehicle_type) if x)
+
+
+class VehicleOption(db.Model):
+    """The choices in the vehicle Size and Type dropdowns, managed on the Fleet page."""
+    __tablename__ = "vehicle_options"
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(10), nullable=False)    # size | type
+    label = db.Column(db.String(80), nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
 
 
 class Driver(db.Model):

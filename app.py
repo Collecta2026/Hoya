@@ -23,7 +23,7 @@ from flask_login import (LoginManager, login_user, logout_user, login_required,
 
 from models import (db, User, Driver, Vehicle, Customer, Order, OrderBox,
                      OrderEvent, ProofOfDelivery, Zone, RateSettings,
-                     Surcharge, OrderSurcharge, Invoice, OrderDrop)
+                     Surcharge, OrderSurcharge, Invoice, OrderDrop, VehicleOption)
 from optimise import optimise_stops, region_of
 from rates import quote_for_order, TIERS
 import pricing
@@ -727,7 +727,49 @@ def register_routes(app):
         require_role("admin", "dispatcher")
         drivers = Driver.query.order_by(Driver.name).all()
         vehicles = Vehicle.query.order_by(Vehicle.registration).all()
-        return render_template("fleet.html", drivers=drivers, vehicles=vehicles)
+        option_rows = VehicleOption.query.order_by(VehicleOption.kind, VehicleOption.sort_order, VehicleOption.id).all()
+        return render_template("fleet.html", drivers=drivers, vehicles=vehicles,
+                                size_options=_vehicle_options("size"), type_options=_vehicle_options("type"),
+                                option_rows=option_rows)
+
+    def _vehicle_options(kind):
+        return [o.label for o in VehicleOption.query.filter_by(kind=kind)
+                .order_by(VehicleOption.sort_order, VehicleOption.id).all()]
+
+    @app.route("/fleet/options/add", methods=["POST"])
+    @login_required
+    def vehicle_option_add():
+        require_role("admin", "dispatcher")
+        kind = request.form.get("kind")
+        label = " ".join((request.form.get("label") or "").split())
+        limit = 20 if kind == "size" else 80
+        if kind not in ("size", "type") or not label:
+            flash("Enter a name for the new option.", "error")
+        elif len(label) > limit:
+            flash(f"Keep {'sizes' if kind == 'size' else 'types'} to {limit} characters or fewer.", "error")
+        elif any(o.lower() == label.lower() for o in _vehicle_options(kind)):
+            flash(f"'{label}' is already in the list.", "error")
+        else:
+            last = db.session.query(db.func.max(VehicleOption.sort_order)).filter_by(kind=kind).scalar() or 0
+            db.session.add(VehicleOption(kind=kind, label=label, sort_order=last + 1))
+            db.session.commit()
+            flash(f"Added vehicle {kind} '{label}'.", "success")
+        return redirect(url_for("fleet") + "#vehicle-options")
+
+    @app.route("/fleet/options/<int:option_id>/delete", methods=["POST"])
+    @login_required
+    def vehicle_option_delete(option_id):
+        require_role("admin", "dispatcher")
+        o = VehicleOption.query.get_or_404(option_id)
+        col = Vehicle.size if o.kind == "size" else Vehicle.vehicle_type
+        in_use = Vehicle.query.filter(col == o.label).count()
+        if in_use:
+            flash(f"Can't remove '{o.label}' - {in_use} vehicle(s) still use it. Change those vehicles first.", "error")
+        else:
+            db.session.delete(o)
+            db.session.commit()
+            flash(f"Removed '{o.label}' from the list.", "success")
+        return redirect(url_for("fleet") + "#vehicle-options")
 
     @app.route("/fleet/drivers/new", methods=["POST"])
     @login_required
@@ -755,11 +797,12 @@ def register_routes(app):
     @login_required
     def vehicle_new():
         require_role("admin", "dispatcher")
-        size = request.form.get("size", "panel_van")
+        size = (request.form.get("size") or "3.5t")[:20]
         cap = request.form.get("capacity_pallets")
         v = Vehicle(registration=request.form["registration"].strip().upper(), size=size,
+                    vehicle_type=(request.form.get("vehicle_type") or "").strip() or None,
                     capacity_pallets=int(cap) if cap else Vehicle.SIZE_CAPACITY.get(size, 4),
-                    mpg=Vehicle.SIZE_MPG_DEFAULT.get(size, 25.0))
+                    mpg=Vehicle.SIZE_MPG_DEFAULT.get(size, 22.0))
         db.session.add(v)
         db.session.commit()
         flash(f"Vehicle {v.registration} added.", "success")
@@ -809,7 +852,9 @@ def register_routes(app):
             return redirect(url_for("fleet"))
         v.registration = reg
         if request.form.get("size"):
-            v.size = request.form["size"]
+            v.size = request.form["size"][:20]
+        if "vehicle_type" in request.form:
+            v.vehicle_type = request.form["vehicle_type"].strip() or None
         try:
             v.capacity_pallets = max(1, int(request.form.get("capacity_pallets") or v.capacity_pallets))
         except ValueError:
@@ -1754,6 +1799,16 @@ def seed_if_needed():
         ]
         for name, amount, is_pct in default_surcharges:
             db.session.add(Surcharge(name=name, default_amount=amount, is_percent=is_pct))
+
+    if not VehicleOption.query.filter_by(kind="size").first():
+        db.session.add(VehicleOption(kind="size", label="3.5t", sort_order=1))
+    if not VehicleOption.query.filter_by(kind="type").first():
+        db.session.add(VehicleOption(kind="type", label="Panel Van", sort_order=1))
+        db.session.add(VehicleOption(kind="type", label="Box Luton with tail-lift", sort_order=2))
+    # Before Nov 2026 "panel_van" was stored as a size; it is really a 3.5t panel van.
+    for v in Vehicle.query.filter_by(size="panel_van").all():
+        v.size = "3.5t"
+        v.vehicle_type = v.vehicle_type or "Panel Van"
 
     for name, amount in [("Waiting time", 30.0),
                          ("Same-day late notice (after 12:00)", 20.0)]:

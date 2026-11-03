@@ -9,12 +9,42 @@ Every quote returns a dict: {ok, net, vat, total, lines, basis, band, reason}.
 (pricing.py's own convention) and excludes VAT; "total" is net+VAT (gross).
 A customer discount_pct, if set, is applied on top of pricing.py's net.
 """
+from datetime import datetime, date
+
 import pricing
 
 TIERS = pricing.TIERS
 
+try:
+    from zoneinfo import ZoneInfo
+    _UK = ZoneInfo("Europe/London")
+except Exception:  # pragma: no cover - tz database missing; fall back to server time
+    _UK = None
 
-def quote_for_order(order, customer, surcharges=None):
+
+def uk_now():
+    return datetime.now(_UK) if _UK else datetime.utcnow()
+
+
+def is_late_same_day(order, now=None):
+    """Rate card: a same-day booking confirmed after 12:00 carries a late-notice fee.
+    True when the job is same-day, is for today (or has no date yet), and it's
+    now 12:00 or later UK time."""
+    if getattr(order, "timing", None) != "same_day":
+        return False
+    now = now or uk_now()
+    d = getattr(order, "delivery_date", None)
+    if isinstance(d, str):
+        try:
+            d = datetime.strptime(d, "%Y-%m-%d").date()
+        except ValueError:
+            d = None
+    if d is not None and d != now.date():
+        return False
+    return now.hour >= 12
+
+
+def quote_for_order(order, customer, surcharges=None, now=None):
     """order: Order instance (unsaved or saved) with pallets/wavelength/manual
     fields already populated. customer: Customer instance. surcharges: list
     of {"label":.., "amount":..} ad-hoc extras (optional, on top of the
@@ -40,7 +70,8 @@ def quote_for_order(order, customer, surcharges=None):
         postcode = order.delivery_postcode if order.job_type != "collection" else order.collection_postcode
         tier = customer.tier if customer else "Standard"
         q = pricing.price_pallet(tier, postcode or "", order.full_pallets or 0, order.half_pallets or 0,
-                                  same_day=(order.timing == "same_day"), surcharges=surcharges)
+                                  same_day=(order.timing == "same_day"), surcharges=surcharges,
+                                  late_notice=is_late_same_day(order, now))
 
     if q.get("ok") and customer and customer.discount_pct:
         factor = 1 - (customer.discount_pct / 100.0)

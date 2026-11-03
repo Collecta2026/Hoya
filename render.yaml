@@ -22,7 +22,7 @@ services:
       - key: SEED_DEMO
         value: "false"
       - key: DEPOT_POSTCODE
-        value: "M1 1AA"
+        value: "PR2 2TE"
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN

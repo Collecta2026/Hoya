@@ -12,6 +12,7 @@ import os
 import io
 import csv
 import random
+import secrets
 import string
 from datetime import datetime, date, timedelta
 
@@ -25,6 +26,7 @@ from models import (db, User, Driver, Vehicle, Customer, Order, OrderBox,
                      Surcharge, OrderSurcharge, Invoice, OrderDrop)
 from optimise import optimise_stops, region_of
 from rates import quote_for_order, TIERS
+import pricing
 from emailer import send_email, SALES_EMAIL
 
 try:
@@ -98,7 +100,7 @@ def ensure_schema():
                 print("[schema] could not add %s.%s: %s" % (table.name, col.name, exc))
 
 
-DEPOT_POSTCODE = os.environ.get("DEPOT_POSTCODE", "M1 1AA")
+DEPOT_POSTCODE = os.environ.get("DEPOT_POSTCODE", "PR2 2TE")  # Riversway, Preston
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +108,14 @@ DEPOT_POSTCODE = os.environ.get("DEPOT_POSTCODE", "M1 1AA")
 # ---------------------------------------------------------------------------
 
 def gen_reference():
-    return "HOY-" + datetime.utcnow().strftime("%y%m%d") + "-" + "".join(
+    return "HL-" + datetime.utcnow().strftime("%y%m%d") + "-" + "".join(
         random.choices(string.ascii_uppercase + string.digits, k=4))
+
+
+def gen_password():
+    """Readable one-off password for new logins (replaces the old shared default password)."""
+    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+    return "-".join("".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(3))
 
 
 def gen_barcode(order_ref, kind, index):
@@ -274,6 +282,7 @@ STATUS_LABELS = {
     "pending": "Pending", "assigned": "Assigned", "picked_up": "Picked Up",
     "in_transit": "In Transit", "delivered": "Delivered", "collected": "Collected",
     "failed": "Failed / Exception", "returned": "Returned",
+    "cancelled": "Cancelled",
 }
 
 
@@ -577,6 +586,92 @@ def register_routes(app):
         db.session.commit()
         return redirect(url_for("order_detail", order_id=order.id))
 
+    def _named_surcharge(name, default_amount):
+        s = Surcharge.query.filter_by(name=name).first()
+        if not s:
+            s = Surcharge(name=name, default_amount=default_amount, is_percent=False)
+            db.session.add(s)
+            db.session.flush()
+        return s
+
+    @app.route("/orders/<int:order_id>/waiting", methods=["POST"])
+    @login_required
+    def order_add_waiting(order_id):
+        """Rate card: first 20 min free at collection and at delivery, then
+        £30/hr pro rata. Adds one 'Waiting time' surcharge line to the job."""
+        require_role("admin", "dispatcher")
+        order = Order.query.get_or_404(order_id)
+        try:
+            coll = float(request.form.get("collection_minutes") or 0)
+            dely = float(request.form.get("delivery_minutes") or 0)
+        except ValueError:
+            flash("Enter waiting time in minutes.", "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        amount = round(pricing.waiting_charge(coll) + pricing.waiting_charge(dely), 2)
+        if amount <= 0:
+            flash("No charge - waiting time is within the free 20 minutes at each stop.", "success")
+            return redirect(url_for("order_detail", order_id=order.id))
+        s = _named_surcharge("Waiting time", pricing.WAITING_RATE_PER_HOUR)
+        db.session.add(OrderSurcharge(order_id=order.id, surcharge_id=s.id, amount=amount))
+        log_event(order, order.status, f"Waiting time added: {coll:.0f} min collection, {dely:.0f} min delivery = £{amount:.2f}")
+        db.session.commit()
+        flash(f"Waiting time charge of £{amount:.2f} added.", "success")
+        return redirect(url_for("order_detail", order_id=order.id))
+
+    @app.route("/orders/<int:order_id>/surcharge/<int:os_id>/delete", methods=["POST"])
+    @login_required
+    def order_remove_surcharge(order_id, os_id):
+        require_role("admin", "dispatcher")
+        line = OrderSurcharge.query.filter_by(id=os_id, order_id=order_id).first_or_404()
+        if line.order.invoiced:
+            flash("This job has already been invoiced - surcharges can't be changed.", "error")
+        else:
+            db.session.delete(line)
+            db.session.commit()
+            flash("Surcharge removed.", "success")
+        return redirect(url_for("order_detail", order_id=order_id))
+
+    @app.route("/orders/<int:order_id>/cancel", methods=["POST"])
+    @login_required
+    def order_cancel(order_id):
+        """Cancel a booking. Rate card: 50% of the job quote applies if the
+        vehicle had already left the depot; otherwise no charge."""
+        require_role("admin", "dispatcher")
+        order = Order.query.get_or_404(order_id)
+        if order.invoiced:
+            flash("This job has already been invoiced and can't be cancelled here.", "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        if order.status in ("delivered", "collected", "cancelled"):
+            flash("This job is already finished or cancelled.", "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        charge_fee = request.form.get("charge_fee") == "on"
+        base_net = order.price_net if order.price_net is not None else (order.quoted_price or 0) / (1 + pricing.VAT)
+        if charge_fee and base_net > 0:
+            fee = round(base_net * pricing.CANCELLATION_PCT, 2)
+            order.price_net = fee
+            order.price_vat = round(fee * pricing.VAT, 2)
+            order.quoted_price = round(fee + order.price_vat, 2)
+            order.price_basis = ((order.price_basis or "") + " - CANCELLED (50% fee)").strip(" -")
+            note = f"Cancelled after vehicle left depot - 50% fee £{fee:.2f} + VAT"
+        else:
+            order.price_net, order.price_vat, order.quoted_price = 0.0, 0.0, 0.0
+            order.price_basis = ((order.price_basis or "") + " - CANCELLED (no charge)").strip(" -")
+            note = "Cancelled - no charge"
+            # no fee: extras shouldn't be billed either
+            for line in list(order.surcharges):
+                db.session.delete(line)
+        if request.form.get("note"):
+            note += " - " + request.form["note"]
+        order.status = "cancelled"
+        log_event(order, "cancelled", note)
+        db.session.commit()
+        try:
+            email_booking(order, "cancelled")
+        except Exception:
+            pass
+        flash(f"{order.reference} cancelled. {note}.", "success")
+        return redirect(url_for("order_detail", order_id=order.id))
+
     @app.route("/orders/<int:order_id>/label")
     @login_required
     def order_label(order_id):
@@ -638,8 +733,10 @@ def register_routes(app):
     @login_required
     def driver_new():
         require_role("admin", "dispatcher")
-        d = Driver(name=request.form["name"], phone=request.form.get("phone"),
-                    pin=request.form.get("pin") or "1234")
+        vid = request.form.get("vehicle_id")
+        d = Driver(name=request.form["name"].strip(), phone=request.form.get("phone"),
+                    pin=request.form.get("pin") or "1234",
+                    current_vehicle_id=int(vid) if vid else None)
         db.session.add(d)
         db.session.commit()
         flash(f"Driver {d.name} added. PIN: {d.pin}", "success")
@@ -659,8 +756,9 @@ def register_routes(app):
     def vehicle_new():
         require_role("admin", "dispatcher")
         size = request.form.get("size", "panel_van")
-        v = Vehicle(registration=request.form["registration"], size=size,
-                    capacity_pallets=Vehicle.SIZE_CAPACITY.get(size, 4),
+        cap = request.form.get("capacity_pallets")
+        v = Vehicle(registration=request.form["registration"].strip().upper(), size=size,
+                    capacity_pallets=int(cap) if cap else Vehicle.SIZE_CAPACITY.get(size, 4),
                     mpg=Vehicle.SIZE_MPG_DEFAULT.get(size, 25.0))
         db.session.add(v)
         db.session.commit()
@@ -675,6 +773,57 @@ def register_routes(app):
         v.status = request.form["status"]
         db.session.commit()
         return redirect(request.referrer or url_for("fleet"))
+
+    @app.route("/fleet/drivers/<int:driver_id>/edit", methods=["POST"])
+    @login_required
+    def driver_edit(driver_id):
+        require_role("admin", "dispatcher")
+        d = Driver.query.get_or_404(driver_id)
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            flash("Driver name can't be blank.", "error")
+            return redirect(url_for("fleet"))
+        d.name = name
+        d.phone = (request.form.get("phone") or "").strip() or None
+        if request.form.get("pin"):
+            d.pin = request.form["pin"].strip()
+        vid = request.form.get("vehicle_id")
+        d.current_vehicle_id = int(vid) if vid else None
+        if request.form.get("status") in ("available", "on_route", "off"):
+            d.status = request.form["status"]
+        # keep the driver's login record (if any) showing the same name
+        for u in User.query.filter_by(driver_id=d.id).all():
+            u.name = d.name
+        db.session.commit()
+        flash(f"Driver {d.name} updated.", "success")
+        return redirect(url_for("fleet"))
+
+    @app.route("/fleet/vehicles/<int:vehicle_id>/edit", methods=["POST"])
+    @login_required
+    def vehicle_edit(vehicle_id):
+        require_role("admin", "dispatcher")
+        v = Vehicle.query.get_or_404(vehicle_id)
+        reg = (request.form.get("registration") or "").strip().upper()
+        if not reg:
+            flash("Registration can't be blank.", "error")
+            return redirect(url_for("fleet"))
+        v.registration = reg
+        if request.form.get("size"):
+            v.size = request.form["size"]
+        try:
+            v.capacity_pallets = max(1, int(request.form.get("capacity_pallets") or v.capacity_pallets))
+        except ValueError:
+            pass
+        try:
+            if request.form.get("mpg"):
+                v.mpg = float(request.form["mpg"])
+        except ValueError:
+            pass
+        if request.form.get("status") in ("available", "on_route", "off_road"):
+            v.status = request.form["status"]
+        db.session.commit()
+        flash(f"Vehicle {v.registration} updated.", "success")
+        return redirect(url_for("fleet"))
 
     ACTIVE_ORDER_STATUSES = ["pending", "assigned", "picked_up", "in_transit"]
 
@@ -748,13 +897,26 @@ def register_routes(app):
     def customer_pricing_set(customer_id):
         require_role("admin", "dispatcher")
         c = Customer.query.get_or_404(customer_id)
+        # Contact details (the edit form sends these; older callers may not)
+        if "name" in request.form:
+            name = request.form["name"].strip()
+            if not name:
+                flash("Customer name can't be blank.", "error")
+                return redirect(url_for("customers_list"))
+            c.name = name
+            for u in User.query.filter_by(customer_id=c.id, role="customer").all():
+                u.name = name
+        for field in ("email", "phone", "billing_address"):
+            if field in request.form:
+                setattr(c, field, request.form[field].strip() or None)
         c.main_product = (request.form.get("main_product") or "").strip() or None
         c.pricing_mode = request.form.get("pricing_mode", c.pricing_mode)
         c.tier = request.form.get("tier", c.tier)
         c.discount_pct = float(request.form.get("discount_pct") or 0)
-        c.flat_rate_per_pallet = float(request.form.get("flat_rate_per_pallet") or c.flat_rate_per_pallet or 25)
+        if request.form.get("flat_rate_per_pallet"):   # legacy flat-rate customers only
+            c.flat_rate_per_pallet = float(request.form["flat_rate_per_pallet"])
         db.session.commit()
-        flash(f"Pricing updated for {c.name}.", "success")
+        flash(f"{c.name} updated.", "success")
         return redirect(url_for("customers_list"))
 
     @app.route("/customers/new", methods=["POST"])
@@ -762,7 +924,7 @@ def register_routes(app):
     def customer_new():
         require_role("admin", "dispatcher")
         c = Customer(
-            name=request.form["name"], email=request.form.get("email"),
+            name=request.form["name"].strip(), email=request.form.get("email"),
             phone=request.form.get("phone"), billing_address=request.form.get("billing_address"),
             main_product=(request.form.get("main_product") or "").strip() or None,
             pricing_mode=request.form.get("pricing_mode", "pallet"),
@@ -776,11 +938,13 @@ def register_routes(app):
 
         portal_email = request.form.get("portal_email")
         if portal_email:
+            pw = request.form.get("portal_password") or gen_password()
             user = User(email=portal_email.strip().lower(), name=c.name, role="customer", customer_id=c.id)
-            user.set_password(request.form.get("portal_password") or "changeme123")
+            user.set_password(pw)
             db.session.add(user)
             db.session.commit()
-            flash(f"Customer {c.name} added with portal login {portal_email}.", "success")
+            shown = "" if request.form.get("portal_password") else f" Password: {pw} (pass this to the customer)"
+            flash(f"Customer {c.name} added with portal login {portal_email}.{shown}", "success")
         else:
             flash(f"Customer {c.name} added.", "success")
         return redirect(url_for("customers_list"))
@@ -800,15 +964,20 @@ def register_routes(app):
         if existing:
             flash(f"{email} is already used by another account.", "error")
             return redirect(url_for("customers_list"))
+        new_pw = None
         if not user:
             user = User(email=email, name=c.name, role="customer", customer_id=c.id)
             db.session.add(user)
+            new_pw = password or gen_password()
         else:
             user.email = email
-        user.set_password(password or "changeme123")
+            new_pw = password or None   # blank = keep their existing password
+        if new_pw:
+            user.set_password(new_pw)
         user.active = True
         db.session.commit()
-        flash(f"Portal login saved for {c.name} ({email}).", "success")
+        shown = f" Password: {new_pw}" if (new_pw and not password) else ""
+        flash(f"Portal login saved for {c.name} ({email}).{shown}", "success")
         return redirect(url_for("customers_list"))
 
     @app.route("/customers/<int:customer_id>/portal/disable", methods=["POST"])
@@ -842,11 +1011,13 @@ def register_routes(app):
         if User.query.filter_by(email=email).first():
             flash(f"{email} already has an account.", "error")
             return redirect(url_for("employees_list"))
+        pw = request.form.get("password") or gen_password()
         user = User(email=email, name=request.form["name"], role=request.form.get("role", "dispatcher"))
-        user.set_password(request.form.get("password") or "changeme123")
+        user.set_password(pw)
         db.session.add(user)
         db.session.commit()
-        flash(f"Employee {user.name} added as {user.role}.", "success")
+        shown = "" if request.form.get("password") else f" Password: {pw}"
+        flash(f"Employee {user.name} added as {user.role}.{shown}", "success")
         return redirect(url_for("employees_list"))
 
     @app.route("/employees/<int:user_id>/toggle", methods=["POST"])
@@ -866,10 +1037,11 @@ def register_routes(app):
     def employee_reset_password(user_id):
         require_role("admin")
         user = User.query.get_or_404(user_id)
-        new_password = request.form.get("password") or "changeme123"
+        new_password = request.form.get("password") or gen_password()
         user.set_password(new_password)
         db.session.commit()
-        flash(f"Password reset for {user.name}.", "success")
+        shown = "" if request.form.get("password") else f" New password: {new_password}"
+        flash(f"Password reset for {user.name}.{shown}", "success")
         return redirect(url_for("employees_list"))
 
     # -----------------------------------------------------------------
@@ -1358,6 +1530,7 @@ def register_routes(app):
         stub.half_pallets = int(data.get("half") or 0)
         stub.pallets = stub.full_pallets + stub.half_pallets
         stub.timing = "same_day" if data.get("same_day") else "48h"
+        stub.delivery_date = data.get("delivery_date") or None
         stub.wl_vehicle = data.get("vehicle", "luton")
         stub.wl_miles = float(data.get("miles") or 0)
         stub.wl_after6 = bool(data.get("after6"))
@@ -1380,7 +1553,9 @@ def register_routes(app):
         require_role("admin", "dispatcher")
         invoices = Invoice.query.order_by(Invoice.created_at.desc()).all()
         uninvoiced_count = Order.query.filter(
-            Order.status.in_(["delivered", "collected"]), Order.invoiced == False  # noqa: E712
+            db.or_(Order.status.in_(["delivered", "collected"]),
+                   db.and_(Order.status == "cancelled", Order.price_net > 0)),
+            Order.invoiced == False  # noqa: E712
         ).count()
         return render_template("invoices.html", invoices=invoices, uninvoiced_count=uninvoiced_count)
 
@@ -1390,7 +1565,9 @@ def register_routes(app):
         require_role("admin", "dispatcher")
         settings = RateSettings.query.first()
         completed = Order.query.filter(
-            Order.status.in_(["delivered", "collected"]), Order.invoiced == False  # noqa: E712
+            db.or_(Order.status.in_(["delivered", "collected"]),
+                   db.and_(Order.status == "cancelled", Order.price_net > 0)),
+            Order.invoiced == False  # noqa: E712
         ).all()
 
         by_customer = {}
@@ -1577,6 +1754,11 @@ def seed_if_needed():
         ]
         for name, amount, is_pct in default_surcharges:
             db.session.add(Surcharge(name=name, default_amount=amount, is_percent=is_pct))
+
+    for name, amount in [("Waiting time", 30.0),
+                         ("Same-day late notice (after 12:00)", 20.0)]:
+        if not Surcharge.query.filter_by(name=name).first():
+            db.session.add(Surcharge(name=name, default_amount=amount, is_percent=False))
 
     db.session.commit()
 

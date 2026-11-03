@@ -80,7 +80,7 @@ def haversine_km(a, b):
     return 2 * R * math.asin(math.sqrt(h))
 
 
-def optimise_stops(orders, depot_postcode="M1"):
+def optimise_stops(orders, depot_postcode="PR2 2TE"):
     """orders: list of Order-like objects with .delivery_postcode (or
     .collection_postcode for collection jobs). Returns the same list
     reordered by greedy nearest-neighbour starting from the depot."""

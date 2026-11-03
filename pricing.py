@@ -45,6 +45,20 @@ BAND_MILES = {"A": "0-25 mi", "B": "26-50 mi", "C": "51-75 mi", "D": "76-100 mi"
 
 SAME_DAY = {"small": 25.0, "large": 35.0}   # 1-3 pallets / 4-6 pallets, bands A-C
 
+# Rate card terms (Sept 2026, section 5 "Surcharges & operational terms")
+LATE_NOTICE_FEE = 20.0        # same-day booking confirmed after 12:00
+MIN_SPACES_BANDS = ("E", "F", "G")   # Bands E-G: minimum of two pallets per shipment
+MIN_SPACES = 2
+WAITING_FREE_MINUTES = 20     # free at each of collection and delivery
+WAITING_RATE_PER_HOUR = 30.0  # thereafter, pro rata
+CANCELLATION_PCT = 0.50       # of the job quote, if cancelled after the vehicle has left the depot
+
+
+def waiting_charge(minutes):
+    """Pro-rata waiting time charge for ONE stop (collection or delivery)."""
+    chargeable = max(0.0, float(minutes or 0) - WAITING_FREE_MINUTES)
+    return round(chargeable / 60.0 * WAITING_RATE_PER_HOUR, 2)
+
 # Per-pallet rates [1..6 pallets] by tier, full & half pallet.
 RATECARD = {
     "Standard": {
@@ -102,43 +116,61 @@ def _per_pallet(tier, kind, band, spaces):
     return arr[min(max(spaces, 1), 6) - 1]
 
 
-def price_pallet(tier, postcode, full_pallets, half_pallets, same_day=False, surcharges=None):
-    """Return a pricing breakdown dict. ok=False with a reason if it can't auto-price."""
+def price_pallet(tier, postcode, full_pallets, half_pallets, same_day=False, surcharges=None,
+                 late_notice=False):
+    """Return a pricing breakdown dict. ok=False with a reason if it can't auto-price.
+    late_notice: True when a same-day booking is confirmed after 12:00 (+£20)."""
     tier = tier or "Standard"
     surcharges = surcharges or []
     band = band_for_postcode(postcode)
     spaces = (full_pallets or 0) + (half_pallets or 0)
     if not band:
         return {"ok": False, "reason": (
-            "Postcode %s is outside the rate-card coverage - quote on request." % postcode.upper()
+            "Postcode %s is outside the rate-card coverage (network-partner area). "
+            "Change the customer's pricing to Custom and enter the agreed price." % postcode.upper()
             if postcode else "Enter a delivery postcode to auto-price."), "band": None}
     if spaces == 0:
         return {"ok": False, "reason": "No pallets on this booking - add pallets or use custom pricing.", "band": band}
 
-    lines, transport = [], 0.0
+    lines, notes, transport = [], [], 0.0
     if full_pallets:
         r = _per_pallet(tier, "full", band, spaces)
         transport += r * full_pallets
     if half_pallets:
         r = _per_pallet(tier, "half", band, spaces)
         transport += r * half_pallets
+    lines.append(("Transport charge", transport, "Band %s - %s tier - %s" % (band, tier, BAND_MILES[band])))
+
+    # Bands E-G carry a minimum of two pallets per shipment: top the transport
+    # charge up to the 2-pallet full-pallet rate for that band and tier.
+    if band in MIN_SPACES_BANDS and spaces < MIN_SPACES:
+        minimum = _per_pallet(tier, "full", band, MIN_SPACES) * MIN_SPACES
+        if transport < minimum:
+            lines.append(("Band %s minimum (2 pallets)" % band, minimum - transport, None))
+            notes.append("Band %s has a 2-pallet minimum per shipment - charged at the 2-pallet rate." % band)
+            transport = minimum
+
     fsc = transport * FSC
     same_amt = 0.0
     if same_day and band in ("A", "B", "C"):
         same_amt = SAME_DAY["small"] if spaces <= 3 else SAME_DAY["large"]
+    elif same_day:
+        notes.append("Same-day beyond Band C is quoted individually - add the agreed charge as a surcharge.")
+    late_amt = LATE_NOTICE_FEE if (same_day and late_notice) else 0.0
     sur_total = sum(s.get("amount", 0) for s in surcharges)
-    sub = transport + fsc + same_amt + sur_total
+    sub = transport + fsc + same_amt + late_amt + sur_total
     vat = sub * VAT
     total = sub + vat
 
-    lines.append(("Transport charge", transport, "Band %s - %s tier - %s" % (band, tier, BAND_MILES[band])))
     lines.append(("Fuel surcharge 16%", fsc, None))
     if same_amt:
         lines.append(("Same-day service", same_amt, None))
+    if late_amt:
+        lines.append(("Same-day late notice (booked after 12:00)", late_amt, None))
     for s in surcharges:
         lines.append(("Surcharge - " + s.get("label", "Surcharge"), s.get("amount", 0), None))
     return {"ok": True, "band": band, "tier": tier, "spaces": spaces,
-            "net": sub, "vat": vat, "total": total, "lines": lines,
+            "net": sub, "vat": vat, "total": total, "lines": lines, "notes": notes,
             "basis": "Pallet - Band %s - %s" % (band, tier)}
 
 

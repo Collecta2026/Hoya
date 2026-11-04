@@ -9,7 +9,7 @@
     {% for o in orders %}
     <tr>
       <td>{{ o.reference }}</td><td>{{ o.job_type }}</td><td>{{ o.delivery_postcode }}</td>
-      <td><span class="badge bg-secondary badge-status">{{ o.status }}</span></td>
+      <td><span class="badge badge-status st-{{ o.status }}">{{ status_labels.get(o.status, o.status) }}</span></td>
       <td><a href="{{ url_for('portal_track', reference=o.reference) }}">Track</a></td>
     </tr>
     {% else %}<tr><td colspan="5" class="text-muted">No orders yet.</td></tr>{% endfor %}

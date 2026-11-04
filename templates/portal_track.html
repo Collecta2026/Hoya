@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Track {{ order.reference }}{% endblock %}
 {% block content %}
-<h3>{{ order.reference }} <span class="badge bg-secondary badge-status">{{ status_labels[order.status] }}</span></h3>
+<h3>{{ order.reference }} <span class="badge badge-status st-{{ order.status }}">{{ status_labels.get(order.status, order.status) }}</span></h3>
 <p>{{ order.delivery_address }}, {{ order.delivery_postcode }}</p>
 <p class="text-muted">Collection {{ order.collection_date or '—' }} {{ order.collection_time or '' }} &middot; Delivery {{ order.delivery_date or '—' }} ({{ order.timing }})</p>
 <div class="card p-3">

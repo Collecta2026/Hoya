@@ -30,15 +30,18 @@
 <div class="card p-3">
   <h5>Recent orders</h5>
   <table class="table table-sm">
-    <thead><tr><th>Ref</th><th>Customer</th><th>Type</th><th>Status</th><th>Destination</th><th></th></tr></thead>
+    <thead><tr><th>Ref</th><th>Customer</th><th>Type</th><th>Status</th><th>Destination</th><th class="text-end">Price <span class="fw-normal text-muted small">(ex VAT)</span></th><th></th></tr></thead>
     <tbody>
       {% for o in recent %}
       <tr>
         <td>{{ o.reference }}</td><td>{{ o.customer.name }}</td><td>{{ o.job_type }}</td>
-        <td><span class="badge bg-secondary badge-status">{{ o.status }}</span></td>
-        <td>{{ o.delivery_postcode }}</td>
-        <td><a href="{{ url_for('order_detail', order_id=o.id) }}">View</a></td>
+        <td><span class="badge badge-status st-{{ o.status }}">{{ status_labels.get(o.status, o.status) }}</span></td>
+        <td>{{ 'Multiple drops' if o.delivery_postcode == 'MULTIPLE' else o.delivery_postcode }}</td>
+        <td class="text-end">{% if o.price_net is not none %}£{{ '%.2f'|format(o.price_net) }}{% elif o.quoted_price %}£{{ '%.2f'|format(o.quoted_price) }} <span class="text-muted small">inc VAT</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td class="ps-4 text-end"><a href="{{ url_for('order_detail', order_id=o.id) }}">View</a></td>
       </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-muted small">No orders yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

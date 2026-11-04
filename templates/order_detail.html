@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Order {{ order.reference }}{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h3>{{ order.reference }} <span class="badge bg-secondary badge-status">{{ status_labels[order.status] }}</span></h3>
+  <h3>{{ order.reference }} <span class="badge badge-status st-{{ order.status }}">{{ status_labels.get(order.status, order.status) }}</span></h3>
   <a class="btn btn-outline-secondary" href="{{ url_for('order_label', order_id=order.id) }}" target="_blank">Print Labels</a>
   <a class="btn btn-outline-secondary" href="{{ url_for('delivery_note', order_id=order.id) }}" target="_blank">Delivery Note</a>
 </div>

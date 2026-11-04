@@ -8,7 +8,7 @@
   {% for status in board_statuses %}
   <div class="col">
     <div class="board-col">
-      <h6>{{ status_labels[status] }} ({{ columns[status]|length }})</h6>
+      <h6><span class="st-dot st-{{ status }}"></span>{{ status_labels[status] }} ({{ columns[status]|length }})</h6>
       {% for o in columns[status] %}
       <div class="order-card">
         <div class="ref">{{ o.reference }}</div>

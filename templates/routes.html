@@ -36,7 +36,7 @@
       </div>
       <ol class="mb-0">
         {% for o in active_by_driver[d.id] %}
-        <li>{{ o.reference }} — {{ o.delivery_postcode }} <span class="badge bg-secondary badge-status">{{ o.status }}</span></li>
+        <li>{{ o.reference }} — {{ o.delivery_postcode }} <span class="badge badge-status st-{{ o.status }}">{{ status_labels.get(o.status, o.status) }}</span></li>
         {% else %}<li class="text-muted">No active stops.</li>{% endfor %}
       </ol>
     </div>

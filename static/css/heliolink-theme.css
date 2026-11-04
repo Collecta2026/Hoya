@@ -178,3 +178,29 @@ main.container-fluid{
   margin-left:auto;
   margin-right:auto;
 }
+
+/* =====================================================================
+   7. JOB STATUS COLOURS  -  same colour for a status everywhere it appears
+   (dashboard, job page, schedule, dispatch board, routes, customer portal)
+   ===================================================================== */
+.st-pending    { --st-bg:#F59E0B; --st-fg:#1E2330; }   /* amber  - waiting to be assigned */
+.st-assigned   { --st-bg:#2563EB; --st-fg:#fff; }      /* blue   - driver assigned */
+.st-picked_up  { --st-bg:#7C3AED; --st-fg:#fff; }      /* purple - collected from customer */
+.st-in_transit { --st-bg:#0E7490; --st-fg:#fff; }      /* teal   - on the road */
+.st-delivered,
+.st-collected  { --st-bg:#15803D; --st-fg:#fff; }      /* green  - done */
+.st-failed     { --st-bg:#DC2626; --st-fg:#fff; }      /* red    - exception */
+.st-returned   { --st-bg:#9A3412; --st-fg:#fff; }      /* brown  - returned */
+.st-cancelled  { --st-bg:#6B7280; --st-fg:#fff; }      /* grey   - cancelled */
+
+.badge.badge-status[class*="st-"],
+.pill[class*="st-"],
+.chip[class*="st-"] {
+  background-color: var(--st-bg) !important;
+  color: var(--st-fg) !important;
+  font-weight: 600;
+}
+.chip[class*="st-"] { border-radius: 10px; padding: 1px 7px; }
+/* small coloured dot, used in column headings */
+.st-dot { display:inline-block; width:.65em; height:.65em; border-radius:50%;
+          background: var(--st-bg); margin-right:.35em; vertical-align: middle; }

@@ -64,6 +64,16 @@ def create_app():
         return User.query.get(int(user_id))
 
     register_routes(app)
+
+    @app.after_request
+    def no_stale_pages(response):
+        """Always show live data: stop browsers keeping a saved copy of Hoya's
+        pages, so the Back button or a switched-back tab never shows an
+        out-of-date dashboard/schedule (e.g. a job that's just been cancelled).
+        Only affects pages, not the CSS/JS/images in /static."""
+        if response.mimetype == "text/html":
+            response.headers["Cache-Control"] = "no-store"
+        return response
     # status names ("In Transit", ...) available in every template, for the colour-coded badges
     app.jinja_env.globals.setdefault("status_labels", STATUS_LABELS)
 
@@ -798,7 +808,8 @@ def register_routes(app):
         except Exception:
             pass
         flash(f"{order.reference} cancelled. {note}.", "success")
-        return redirect(url_for("order_detail", order_id=order.id))
+        # back to the dashboard, freshly loaded, so the job has already gone from Recent orders
+        return redirect(url_for("dashboard"))
 
     @app.route("/orders/<int:order_id>/label")
     @login_required

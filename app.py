@@ -64,6 +64,8 @@ def create_app():
         return User.query.get(int(user_id))
 
     register_routes(app)
+    # status names ("In Transit", ...) available in every template, for the colour-coded badges
+    app.jinja_env.globals.setdefault("status_labels", STATUS_LABELS)
 
     with app.app_context():
         db.create_all()
@@ -405,7 +407,8 @@ def register_routes(app):
         failed_count = Order.query.filter_by(status="failed").count()
         available_drivers = Driver.query.filter_by(status="available").count()
         available_vans = Vehicle.query.filter_by(status="available").count()
-        recent = Order.query.order_by(Order.created_at.desc()).limit(8).all()
+        recent = (Order.query.filter(Order.status != "cancelled")
+                  .order_by(Order.created_at.desc()).limit(8).all())
         recent_pods = (
             ProofOfDelivery.query.filter(ProofOfDelivery.photo_data_url.isnot(None))
             .order_by(ProofOfDelivery.delivered_at.desc())
@@ -421,18 +424,34 @@ def register_routes(app):
     @login_required
     def schedule():
         require_role("admin", "dispatcher")
+        # Two weeks at a time: the chosen week (default: this week) and the next one.
         ref = _parse_date(request.args.get("week")) or date.today()
         start = ref - timedelta(days=ref.weekday())
-        days = [start + timedelta(days=i) for i in range(7)]
-        orders = Order.query.filter(Order.delivery_date >= start,
-                                     Order.delivery_date <= start + timedelta(days=6)).all()
+        days = [start + timedelta(days=i) for i in range(14)]
+        end = days[-1]
+        orders = Order.query.filter(Order.delivery_date >= start, Order.delivery_date <= end,
+                                     Order.status != "cancelled").all()
         by_day = {d: [] for d in days}
         for o in orders:
             by_day.get(o.delivery_date, []).append(o)
         for d in by_day:
             by_day[d].sort(key=lambda o: (o.delivery_time or o.collection_time or "99:99"))
-        return render_template("schedule.html", days=days, by_day=by_day, today=date.today(),
-                                status_labels=STATUS_LABELS, week_start=start, week_end=start + timedelta(days=6),
+        this_monday = date.today() - timedelta(days=date.today().weekday())
+        weeks = []
+        for w in range(2):
+            wstart = start + timedelta(days=7 * w)
+            if wstart == this_monday:
+                name = "This week"
+            elif wstart == this_monday + timedelta(days=7):
+                name = "Next week"
+            elif wstart == this_monday - timedelta(days=7):
+                name = "Last week"
+            else:
+                name = "Week of " + wstart.strftime("%d %b")
+            weeks.append({"name": name, "start": wstart, "end": wstart + timedelta(days=6),
+                          "days": days[7 * w:7 * w + 7]})
+        return render_template("schedule.html", days=days, weeks=weeks, by_day=by_day, today=date.today(),
+                                status_labels=STATUS_LABELS, week_start=start, week_end=end,
                                 prev_week=(start - timedelta(days=7)).isoformat(),
                                 next_week=(start + timedelta(days=7)).isoformat(),
                                 this_week=date.today().isoformat())

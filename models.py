@@ -239,6 +239,23 @@ class Order(db.Model):
         return self.job_type == "multidrop"
 
     @property
+    def base_price_ex_vat(self):
+        """The job's own price ex VAT, before surcharges. Rate-card jobs store it
+        in price_net (fuel surcharge included). Jobs priced by the original Hoya
+        engine only have quoted_price, which that engine stored ex VAT."""
+        if self.price_net is not None:
+            return self.price_net
+        return self.quoted_price
+
+    @property
+    def price_ex_vat(self):
+        """What the job is worth ex VAT: its price plus any surcharges (what gets invoiced, before VAT)."""
+        base = self.base_price_ex_vat
+        if base is None:
+            return None
+        return round(base + sum(s.amount or 0 for s in self.surcharges), 2)
+
+    @property
     def total_weight_kg(self):
         return round((self.weight_per_pallet_kg or 0) * (self.pallets or 0), 1)
 
@@ -343,6 +360,7 @@ class OrderSurcharge(db.Model):
     order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=False)
     surcharge_id = db.Column(db.Integer, db.ForeignKey("surcharges.id"), nullable=False)
     amount = db.Column(db.Float, default=0.0)
+    note = db.Column(db.String(120))   # e.g. "12% of £150.00" for a percentage surcharge
 
     surcharge = db.relationship("Surcharge")
 

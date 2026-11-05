@@ -12,6 +12,7 @@ import os
 import io
 import csv
 import random
+import re
 import secrets
 import string
 from datetime import datetime, date, timedelta
@@ -588,7 +589,7 @@ def register_routes(app):
     def order_detail(order_id):
         require_role("admin", "dispatcher")
         order = Order.query.get_or_404(order_id)
-        surcharges = Surcharge.query.all()
+        surcharges = Surcharge.query.filter(Surcharge.name != FSC_NAME).all()
         drivers = Driver.query.order_by(Driver.name).all()
         vehicles = Vehicle.query.order_by(Vehicle.registration).all()
         extras = sum(s.amount for s in order.surcharges)
@@ -642,11 +643,49 @@ def register_routes(app):
         order = Order.query.get_or_404(order_id)
         surcharge_id = int(request.form["surcharge_id"])
         surcharge = Surcharge.query.get_or_404(surcharge_id)
-        amount = surcharge.default_amount
-        if surcharge.is_percent and order.quoted_price:
-            amount = round(order.quoted_price * surcharge.default_amount / 100.0, 2)
-        db.session.add(OrderSurcharge(order_id=order.id, surcharge_id=surcharge.id, amount=amount))
+        amount, note = surcharge.default_amount, None
+        if surcharge.is_percent:
+            # percentages are worked out on the job's price ex VAT (not the VAT-inclusive total)
+            base = order.base_price_ex_vat or 0
+            amount = round(base * surcharge.default_amount / 100.0, 2)
+            note = "%g%% of £%.2f" % (surcharge.default_amount, base)
+        db.session.add(OrderSurcharge(order_id=order.id, surcharge_id=surcharge.id, amount=amount, note=note))
         db.session.commit()
+        return redirect(url_for("order_detail", order_id=order.id))
+
+    FSC_NAME = "Fuel surcharge (FSC)"
+
+    @app.route("/orders/<int:order_id>/fsc", methods=["POST"])
+    @login_required
+    def order_add_fsc(order_id):
+        """Add a fuel surcharge at a chosen % of the job's price ex VAT."""
+        require_role("admin", "dispatcher")
+        order = Order.query.get_or_404(order_id)
+        if order.invoiced:
+            flash("This job has already been invoiced - surcharges can't be changed.", "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        try:
+            pct = float((request.form.get("fsc_pct") or "").strip())
+        except ValueError:
+            pct = None
+        if pct is None or pct <= 0 or pct > 100:
+            flash("Enter the fuel surcharge as a percentage between 0 and 100, e.g. 16.", "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        base = order.base_price_ex_vat
+        if not base:
+            flash("This job has no price yet, so there's nothing to add a fuel surcharge to.", "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        s = Surcharge.query.filter_by(name=FSC_NAME).first()
+        if not s:
+            s = Surcharge(name=FSC_NAME, default_amount=pricing.FSC * 100, is_percent=True)
+            db.session.add(s)
+            db.session.flush()
+        amount = round(base * pct / 100.0, 2)
+        note = "%g%% of £%.2f" % (pct, base)
+        db.session.add(OrderSurcharge(order_id=order.id, surcharge_id=s.id, amount=amount, note=note))
+        log_event(order, order.status, "Fuel surcharge added: %s = £%.2f" % (note, amount))
+        db.session.commit()
+        flash("Fuel surcharge of £%.2f added (%s)." % (amount, note), "success")
         return redirect(url_for("order_detail", order_id=order.id))
 
     def _named_surcharge(name, default_amount):
@@ -740,6 +779,168 @@ def register_routes(app):
         example = pricing.cost_estimate(cs.as_dict(), 100, 2)
         return render_template("cost_settings.html", cs=cs, example=example)
 
+    def _booked_uk(order):
+        """When the job was booked, in UK time (for the same-day late-notice rule)."""
+        booked = order.created_at
+        if booked is None:
+            return None
+        if booked.tzinfo is None:
+            from datetime import timezone
+            booked = booked.replace(tzinfo=timezone.utc)
+        return booked.astimezone(rates_uk_tz) if rates_uk_tz is not None else booked
+
+    EDIT_FIELDS = ["customer_id", "job_type", "collection_address", "collection_postcode",
+                   "delivery_address", "delivery_postcode", "contact_name", "contact_phone",
+                   "goods_category", "goods_description", "quantity_summary", "full_pallets",
+                   "half_pallets", "parcels", "weight_per_pallet_kg", "priority", "timing",
+                   "collection_date", "collection_time", "delivery_date", "delivery_time",
+                   "cod_amount", "wl_vehicle", "wl_miles", "wl_after6", "manual_net", "notes"]
+    EDIT_LABELS = {"customer_id": "customer", "full_pallets": "pallets", "half_pallets": "half pallets",
+                   "parcels": "other items", "quantity_summary": "quantity description",
+                   "weight_per_pallet_kg": "weight", "cod_amount": "cash on delivery",
+                   "wl_vehicle": "vehicle", "wl_miles": "round-trip miles", "wl_after6": "after 6pm",
+                   "manual_net": "agreed price"}
+
+    @app.route("/orders/<int:order_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def order_edit(order_id):
+        """Edit a saved job's shipment details. Keeps labels, price and cost
+        miles consistent with the new details."""
+        require_role("admin", "dispatcher")
+        order = Order.query.get_or_404(order_id)
+        customers = Customer.query.order_by(Customer.name).all()
+        if order.invoiced or order.status == "cancelled":
+            flash("Invoiced or cancelled jobs can't be edited.", "error")
+            return redirect(url_for("order_detail", order_id=order.id))
+        scanned_any = any(b.scanned for b in order.boxes)
+        if request.method == "GET":
+            return render_template("order_edit.html", order=order, customers=customers, scanned_any=scanned_any)
+
+        f = request.form
+        errors = []
+
+        def num(name, cast=float, default=0):
+            raw = (f.get(name) or "").strip()
+            if raw == "":
+                return default
+            try:
+                v = cast(raw)
+            except ValueError:
+                errors.append(f"'{raw}' isn't a valid number for {EDIT_LABELS.get(name, name.replace('_', ' '))}.")
+                return default
+            if v < 0:
+                errors.append(f"{EDIT_LABELS.get(name, name.replace('_', ' ')).capitalize()} can't be negative.")
+            return v
+
+        def hhmm(name):
+            raw = (f.get(name) or "").strip()
+            if raw and not re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", raw):
+                errors.append(f"Times must be HH:MM (e.g. 09:30) - got '{raw}'.")
+                return getattr(order, name)
+            return raw or None
+
+        customer = Customer.query.get(f.get("customer_id", type=int) or order.customer_id) or order.customer
+        job_type = "multidrop" if order.is_multidrop else (f.get("job_type") if f.get("job_type") in ("delivery", "collection") else order.job_type)
+        full, half, other = num("full_pallets", int), num("half_pallets", int), num("parcels", int)
+        old_counts = (order.full_pallets or 0, order.half_pallets or 0, order.parcels or 0)
+        counts_changed = (full, half, other) != old_counts
+        if counts_changed and scanned_any:
+            errors.append("Quantities can't be changed once pallets have been scanned - the labels are already in use.")
+        if counts_changed and (full + half + other) == 0:
+            errors.append("A job needs at least one pallet or item.")
+        if not order.is_multidrop:
+            if not (f.get("delivery_address") or "").strip():
+                errors.append("Enter a delivery address.")
+            if not (f.get("delivery_postcode") or "").strip():
+                errors.append("Enter a delivery postcode.")
+        new = {
+            "customer_id": customer.id,
+            "job_type": job_type,
+            "collection_address": (f.get("collection_address") or "").strip() or None,
+            "collection_postcode": (f.get("collection_postcode") or "").strip().upper() or None,
+            "delivery_address": ((f.get("delivery_address") or "").strip() or order.delivery_address),
+            "delivery_postcode": "MULTIPLE" if order.is_multidrop else (f.get("delivery_postcode") or "").strip().upper(),
+            "contact_name": (f.get("contact_name") or "").strip() or None,
+            "contact_phone": (f.get("contact_phone") or "").strip() or None,
+            "goods_category": (f.get("goods_category") or "").strip() or None,
+            "goods_description": (f.get("goods_description") or "").strip() or None,
+            "full_pallets": full, "half_pallets": half, "parcels": other,
+            "weight_per_pallet_kg": num("weight_per_pallet_kg"),
+            "priority": f.get("priority") if f.get("priority") in ("standard", "express") else order.priority,
+            "timing": f.get("timing") if f.get("timing") in ("same_day", "48h", "booked") else order.timing,
+            "collection_date": _parse_date(f.get("collection_date")),
+            "collection_time": hhmm("collection_time"),
+            "delivery_date": _parse_date(f.get("delivery_date")),
+            "delivery_time": hhmm("delivery_time"),
+            "cod_amount": num("cod_amount"),
+            "wl_vehicle": f.get("wl_vehicle") or order.wl_vehicle,
+            "wl_miles": num("wl_miles", default=None) if "wl_miles" in f else order.wl_miles,
+            "wl_after6": (f.get("wl_after6") == "on") if "wl_vehicle" in f else order.wl_after6,
+            "manual_net": num("manual_net", default=None) if "manual_net" in f else order.manual_net,
+            "notes": (f.get("notes") or "").strip() or None,
+        }
+        summary = (f.get("quantity_summary") or "").strip()
+        if counts_changed and summary == (order.quantity_summary or ""):
+            parts = []   # rebuild the description from the new counts
+            if full: parts.append(f"{full} {_pluralize('Pallet', full)}")
+            if half: parts.append(f"{half} {_pluralize('Half pallet', half)}")
+            if other: parts.append(f"{other} {_pluralize('Item', other)}")
+            summary = ", ".join(parts)
+        new["quantity_summary"] = summary or None
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template("order_edit.html", order=order, customers=customers, scanned_any=scanned_any), 400
+
+        old_mode = order.customer.pricing_mode if order.customer else None
+        old_estimate = estimate_job_miles(order, old_mode)[0]
+        miles_were_auto = order.est_miles is None or (old_estimate is not None and abs(order.est_miles - old_estimate) < 0.01)
+        def _norm(x):   # blank text and "nothing" count as the same (older jobs store blanks as "")
+            return None if x in ("", None) else x
+        changed = [k for k in EDIT_FIELDS if _norm(getattr(order, k)) != _norm(new[k])]
+        if not changed:
+            flash("No changes to save.", "success")
+            return redirect(url_for("order_detail", order_id=order.id))
+        for k in changed:
+            setattr(order, k, new[k])
+        order.customer = customer
+        order.pallets = full + half
+
+        if counts_changed:   # re-issue the barcode labels to match the new counts
+            for b in list(order.boxes):
+                db.session.delete(b)
+            db.session.flush()
+            for i in range(1, order.pallets + 1):
+                db.session.add(OrderBox(order_id=order.id, kind="pallet", label_index=i,
+                                         barcode=gen_barcode(order.reference, "pallet", i)))
+            for i in range(1, other + 1):
+                db.session.add(OrderBox(order_id=order.id, kind="parcel", label_index=i,
+                                         barcode=gen_barcode(order.reference, "parcel", i)))
+        if miles_were_auto:
+            order.est_miles = estimate_job_miles(order, customer.pricing_mode)[0]
+
+        price_msg = ""
+        if f.get("reprice") == "on":
+            q = quote_for_order(order, customer, now=_booked_uk(order))
+            if q.get("ok"):
+                old = order.price_net
+                order.price_net, order.price_vat = round(q["net"], 2), round(q["vat"], 2)
+                order.quoted_price, order.price_basis = round(q["total"], 2), q["basis"]
+                if old is None or abs((old or 0) - order.price_net) > 0.005:
+                    price_msg = " Price £%.2f → £%.2f net." % (old or 0, order.price_net)
+            else:
+                price_msg = " Price NOT updated: " + (q.get("reason") or "couldn't price this job") + "."
+        names = ", ".join(EDIT_LABELS.get(k, k.replace("_", " ")) for k in changed)
+        log_event(order, order.status, "Details edited: " + names + price_msg.replace("→", "->"))
+        db.session.commit()
+        try:
+            email_booking(order, "amended")
+        except Exception:
+            pass
+        flash("Job updated (" + names + ")." + price_msg + (" Labels re-issued - reprint them." if counts_changed else ""),
+              "error" if "NOT updated" in price_msg else "success")
+        return redirect(url_for("order_detail", order_id=order.id))
+
     @app.route("/orders/<int:order_id>/reprice", methods=["POST"])
     @login_required
     def order_reprice(order_id):
@@ -751,13 +952,7 @@ def register_routes(app):
         if order.invoiced or order.status == "cancelled":
             flash("Invoiced or cancelled jobs can't be re-priced.", "error")
             return redirect(url_for("order_detail", order_id=order.id))
-        booked = order.created_at
-        if booked is not None and booked.tzinfo is None:
-            from datetime import timezone
-            booked = booked.replace(tzinfo=timezone.utc)
-        if booked is not None and rates_uk_tz is not None:
-            booked = booked.astimezone(rates_uk_tz)
-        q = quote_for_order(order, order.customer, now=booked)
+        q = quote_for_order(order, order.customer, now=_booked_uk(order))
         if not q.get("ok"):
             flash("Couldn't re-price: " + (q.get("reason") or "unknown reason"), "error")
             return redirect(url_for("order_detail", order_id=order.id))

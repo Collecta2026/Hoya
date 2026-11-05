@@ -1,0 +1,145 @@
+{% extends "base.html" %}{% block title %}Edit {{ order.reference }}{% endblock %}
+{# v(): the value just typed (if the form came back with an error), otherwise the job's saved value #}
+{% macro v(name, saved) -%}{{ request.form.get(name) if request.method == 'POST' else (saved if saved is not none else '') }}{%- endmacro %}
+{% macro sel(name, value, saved) -%}{{ 'selected' if (request.form.get(name) if request.method == 'POST' else saved) == value }}{%- endmacro %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Edit {{ order.reference }}</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('order_detail', order_id=order.id) }}">Back to job</a>
+</div>
+<form method="post" class="card p-4" style="max-width:980px">
+  <div class="row">
+    <div class="col-md-6 mb-3"><label class="form-label">Customer</label>
+      <select name="customer_id" id="customerSelect" class="form-select">
+        {% for c in customers %}<option value="{{ c.id }}" data-mode="{{ c.pricing_mode }}" {{ sel('customer_id', c.id|string, order.customer_id|string) }}>{{ c.name }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-6 mb-3"><label class="form-label">Job type</label>
+      {% if order.is_multidrop %}
+      <input class="form-control" value="Multi-drop round" disabled>
+      <div class="form-text">Multi-drop rounds stay multi-drop. Edit the drops in the Route Planner.</div>
+      {% else %}
+      <select name="job_type" class="form-select">
+        <option value="delivery" {{ sel('job_type', 'delivery', order.job_type) }}>Delivery</option>
+        <option value="collection" {{ sel('job_type', 'collection', order.job_type) }}>Collection</option>
+      </select>
+      {% endif %}</div>
+  </div>
+  <div class="row">
+    <div class="col-md-8 mb-3"><label class="form-label">Collection address</label>
+      <input class="form-control" name="collection_address" value="{{ v('collection_address', order.collection_address) }}"></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Collection postcode</label>
+      <input class="form-control" name="collection_postcode" value="{{ v('collection_postcode', order.collection_postcode) }}" style="text-transform:uppercase"></div>
+  </div>
+  <div class="row">
+    {% if order.is_multidrop %}
+    <div class="col-12 mb-3"><label class="form-label">Round / region name</label>
+      <input class="form-control" name="delivery_address" value="{{ v('delivery_address', order.delivery_address) }}"></div>
+    {% else %}
+    <div class="col-md-8 mb-3"><label class="form-label">Delivery address *</label>
+      <input class="form-control" name="delivery_address" value="{{ v('delivery_address', order.delivery_address) }}" required></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Delivery postcode *</label>
+      <input class="form-control" name="delivery_postcode" value="{{ v('delivery_postcode', order.delivery_postcode) }}" required style="text-transform:uppercase"></div>
+    {% endif %}
+  </div>
+  <div class="row">
+    <div class="col-md-6 mb-3"><label class="form-label">Contact name</label>
+      <input class="form-control" name="contact_name" value="{{ v('contact_name', order.contact_name) }}"></div>
+    <div class="col-md-6 mb-3"><label class="form-label">Contact phone</label>
+      <input class="form-control" name="contact_phone" value="{{ v('contact_phone', order.contact_phone) }}"></div>
+  </div>
+  <hr>
+  <div class="row">
+    <div class="col-md-6 mb-3"><label class="form-label">Goods category</label>
+      <input class="form-control" name="goods_category" value="{{ v('goods_category', order.goods_category) }}"></div>
+    <div class="col-md-6 mb-3"><label class="form-label">Goods description</label>
+      <input class="form-control" name="goods_description" value="{{ v('goods_description', order.goods_description) }}"></div>
+  </div>
+  <div class="row">
+    <div class="col-md-3 mb-3"><label class="form-label">Pallets</label>
+      <input class="form-control" type="number" min="0" name="full_pallets" value="{{ v('full_pallets', order.full_pallets or 0) }}" {{ 'readonly' if scanned_any }}></div>
+    <div class="col-md-3 mb-3"><label class="form-label">Half pallets</label>
+      <input class="form-control" type="number" min="0" name="half_pallets" value="{{ v('half_pallets', order.half_pallets or 0) }}" {{ 'readonly' if scanned_any }}></div>
+    <div class="col-md-3 mb-3"><label class="form-label">Other items <span class="text-muted small">(boxes, parcels…)</span></label>
+      <input class="form-control" type="number" min="0" name="parcels" value="{{ v('parcels', order.parcels or 0) }}" {{ 'readonly' if scanned_any }}></div>
+    <div class="col-md-3 mb-3"><label class="form-label">Weight per pallet (kg)</label>
+      <input class="form-control" type="number" step="0.1" min="0" name="weight_per_pallet_kg" value="{{ v('weight_per_pallet_kg', order.weight_per_pallet_kg or 0) }}"></div>
+    <div class="col-12 mb-3"><label class="form-label">Quantity description <span class="text-muted small">(shown on labels and the schedule)</span></label>
+      <input class="form-control" name="quantity_summary" value="{{ v('quantity_summary', order.quantity_summary) }}">
+      {% if scanned_any %}<div class="form-text text-danger">Pallets on this job have already been scanned, so the quantities are locked.</div>
+      {% else %}<div class="form-text">If you change the numbers, the barcode labels are re-issued. Reprint them afterwards.</div>{% endif %}</div>
+  </div>
+  <div class="row">
+    <div class="col-md-4 mb-3"><label class="form-label">Priority</label>
+      <select name="priority" class="form-select">
+        <option value="standard" {{ sel('priority', 'standard', order.priority) }}>Standard</option>
+        <option value="express" {{ sel('priority', 'express', order.priority) }}>Express</option>
+      </select></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Timing</label>
+      <select name="timing" class="form-select">
+        <option value="same_day" {{ sel('timing', 'same_day', order.timing) }}>Same day</option>
+        <option value="48h" {{ sel('timing', '48h', order.timing) }}>48 hours</option>
+        <option value="booked" {{ sel('timing', 'booked', order.timing) }}>Booked slot</option>
+      </select></div>
+    <div class="col-md-4 mb-3"><label class="form-label">Cash on delivery (£)</label>
+      <input class="form-control" type="number" step="0.01" min="0" name="cod_amount" value="{{ v('cod_amount', order.cod_amount or 0) }}"></div>
+  </div>
+  <div class="row">
+    <div class="col-md-3 mb-3"><label class="form-label">Collection date</label>
+      <input class="form-control" type="date" name="collection_date" value="{{ v('collection_date', order.collection_date.isoformat() if order.collection_date else '') }}"></div>
+    <div class="col-md-3 mb-3"><label class="form-label">Collection time</label>
+      <input class="form-control" type="time" name="collection_time" value="{{ v('collection_time', order.collection_time) }}"></div>
+    <div class="col-md-3 mb-3"><label class="form-label">Delivery date</label>
+      <input class="form-control" type="date" name="delivery_date" value="{{ v('delivery_date', order.delivery_date.isoformat() if order.delivery_date else '') }}"></div>
+    <div class="col-md-3 mb-3"><label class="form-label">Delivery time</label>
+      <input class="form-control" type="time" name="delivery_time" value="{{ v('delivery_time', order.delivery_time) }}"></div>
+  </div>
+
+  {% set wl_on = order.customer and order.customer.pricing_mode == 'wavelength' %}
+  <fieldset id="wavelengthFields" class="row border rounded p-2 mb-3 bg-light {{ '' if wl_on else 'd-none' }}" {{ '' if wl_on else 'disabled' }}>
+    <div class="col-md-4 mb-2"><label class="form-label">Vehicle (Wavelength)</label>
+      <select class="form-select" name="wl_vehicle">
+        <option value="luton" {{ sel('wl_vehicle', 'luton', order.wl_vehicle) }}>3.5t Luton</option>
+        <option value="maxus" {{ sel('wl_vehicle', 'maxus', order.wl_vehicle) }}>3.5t Maxus</option>
+      </select></div>
+    <div class="col-md-4 mb-2"><label class="form-label">Round-trip miles</label>
+      <input class="form-control" type="number" step="1" min="0" name="wl_miles" value="{{ v('wl_miles', order.wl_miles) }}"></div>
+    <div class="col-md-4 mb-2 form-check mt-4"><input class="form-check-input" type="checkbox" name="wl_after6" id="after6"
+        {{ 'checked' if (request.form.get('wl_after6') == 'on' if request.method == 'POST' else order.wl_after6) }}>
+      <label class="form-check-label" for="after6">After 6pm</label></div>
+  </fieldset>
+  {% set cu_on = order.is_multidrop or (order.customer and order.customer.pricing_mode == 'custom') %}
+  <fieldset id="customFields" class="row border rounded p-2 mb-3 bg-light {{ '' if cu_on else 'd-none' }}" {{ '' if cu_on else 'disabled' }}>
+    <div class="col-md-6 mb-2"><label class="form-label">Agreed net price (£, ex VAT)</label>
+      <input class="form-control" type="number" step="0.01" min="0" name="manual_net" value="{{ v('manual_net', order.manual_net) }}"></div>
+  </fieldset>
+
+  <div class="mb-3"><label class="form-label">Package notes</label>
+    <textarea class="form-control" name="notes" rows="2">{{ v('notes', order.notes) }}</textarea></div>
+
+  <div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" name="reprice" id="reprice" {{ 'checked' if (request.form.get('reprice') == 'on' if request.method == 'POST' else True) }}>
+    <label class="form-check-label" for="reprice">Recalculate the price from the rate card
+      <span class="text-muted small">(currently £{{ '%.2f'|format(order.price_net or 0) }} net). Untick to keep the current price.</span></label>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary" type="submit">Save changes</button>
+    <a class="btn btn-link" href="{{ url_for('order_detail', order_id=order.id) }}">Cancel</a>
+  </div>
+  <p class="text-muted small mt-2 mb-0">Saving sends an "amended" email to sales@ and records the change in the job's history.</p>
+</form>
+<script>
+// show the Wavelength / agreed-price boxes to match the chosen customer's pricing
+(function () {
+  var sel = document.getElementById("customerSelect");
+  var multidrop = {{ 'true' if order.is_multidrop else 'false' }};
+  function toggle() {
+    var mode = sel.selectedOptions[0].dataset.mode;
+    var wl = document.getElementById("wavelengthFields"), cu = document.getElementById("customFields");
+    var wlOn = mode === "wavelength", cuOn = multidrop || mode === "custom";
+    wl.classList.toggle("d-none", !wlOn); wl.disabled = !wlOn;   // hidden boxes don't submit
+    cu.classList.toggle("d-none", !cuOn); cu.disabled = !cuOn;
+  }
+  sel.addEventListener("change", toggle);
+})();
+</script>
+{% endblock %}

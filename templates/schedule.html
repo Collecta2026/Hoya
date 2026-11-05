@@ -55,7 +55,8 @@
         <div class="jcust">{{ o.customer.name }}</div>
         {% if o.goods_category %}<div>{{ o.goods_category }}</div>{% endif %}
         {% if o.quantity_summary %}<div>▪ {{ o.quantity_summary }}</div>{% endif %}
-        {% if o.quoted_price %}<div class="jprice">£{{ '%.2f'|format(o.quoted_price) }} inc VAT</div>{% endif %}
+        {% set p = o.price_ex_vat %}
+        {% if p %}<div class="jprice">£{{ '%.2f'|format(p) }} ex VAT</div>{% endif %}
         <div class="jmeta">
           {% if o.job_type != 'delivery' %}<span class="chip">{{ 'Multi-drop' if o.job_type=='multidrop' else o.job_type }}</span>{% endif %}
           <span>{{ o.driver.name if o.driver else 'Unassigned' }}</span>

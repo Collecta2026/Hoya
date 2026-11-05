@@ -37,7 +37,8 @@
         <td>{{ o.reference }}</td><td>{{ o.customer.name }}</td><td>{{ o.job_type }}</td>
         <td><span class="badge badge-status st-{{ o.status }}">{{ status_labels.get(o.status, o.status) }}</span></td>
         <td>{{ 'Multiple drops' if o.delivery_postcode == 'MULTIPLE' else o.delivery_postcode }}</td>
-        <td class="text-end">{% if o.price_net is not none %}£{{ '%.2f'|format(o.price_net) }}{% elif o.quoted_price %}£{{ '%.2f'|format(o.quoted_price) }} <span class="text-muted small">inc VAT</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        {% set p = o.price_ex_vat %}
+        <td class="text-end">{% if p is not none %}£{{ '%.2f'|format(p) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
         <td class="ps-4 text-end"><a href="{{ url_for('order_detail', order_id=o.id) }}">View</a></td>
       </tr>
       {% else %}

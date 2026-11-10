@@ -24,9 +24,10 @@ from flask_login import (LoginManager, login_user, logout_user, login_required,
 
 from models import (db, User, Driver, Vehicle, Customer, Order, OrderBox,
                      OrderEvent, ProofOfDelivery, Zone, RateSettings,
-                     Surcharge, OrderSurcharge, Invoice, OrderDrop, VehicleOption, CostSettings)
+                     Surcharge, OrderSurcharge, Invoice, OrderDrop, VehicleOption, CostSettings,
+                     CustomerAddress, Quote)
 from optimise import optimise_stops, region_of
-from rates import quote_for_order, TIERS, _UK as rates_uk_tz, estimate_job_miles
+from rates import quote_for_order, TIERS, _UK as rates_uk_tz, estimate_job_miles, compare_tiers
 import pricing
 from emailer import send_email, SALES_EMAIL
 
@@ -148,6 +149,20 @@ def job_cost_view(job, mode, net, miles=None):
     cost = pricing.cost_estimate(get_cost_settings().as_dict(), miles, stops)
     return {"miles": cost["miles"], "estimate": est, "note": ("miles adjusted by hand" if edited else note),
             "cost": cost, "margin": pricing.margin(net, cost["total"]) if net else None}
+
+
+def tier_comparison(job, mode=None, cost_miles=None, now=None):
+    """Every rate-card tier's price for this job, each with our margin.
+    Returns {"rows": [...], "cost_total": float or None, "miles": ...}."""
+    rows = compare_tiers(job, now=now)
+    cv = job_cost_view(job, mode or "pallet", None, miles=cost_miles)
+    cost_total = cv.get("cost", {}).get("total") if cv.get("cost") else None
+    for r in rows:
+        r["margin"] = pricing.margin(r["net"], cost_total) if (r["ok"] and cost_total is not None) else None
+    return {"rows": rows, "cost_total": cost_total, "miles": cv.get("miles"), "miles_note": cv.get("note")}
+
+
+FORKLIFT = {"yes": "Yes", "no": "No"}
 
 
 def gen_password():
@@ -493,11 +508,12 @@ def register_routes(app):
             return redirect(url_for("order_detail", order_id=order.id))
         preselect_customer = request.args.get("customer_id", type=int)
         preselect_date = request.args.get("date") or date.today().isoformat()
+        addresses = {c.id: [a.as_dict() for a in c.addresses] for c in customers}
         return render_template("order_form.html", customers=customers, today=date.today().isoformat(),
                                 preselect_customer=preselect_customer, preselect_date=preselect_date,
-                                units=UNITS, tiers=TIERS)
+                                units=UNITS, tiers=TIERS, addresses=addresses)
 
-    def _create_order_from_form(form):
+    def _create_order_from_form(form, price_override=None):
         job_type = form.get("job_type", "delivery")
         multidrop = job_type == "multidrop"
         full, half, other, summary = parse_quantities(form)
@@ -541,6 +557,8 @@ def register_routes(app):
             wl_miles=float(form.get("wl_miles")) if form.get("wl_miles") else None,
             wl_after6=form.get("wl_after6") == "on",
             manual_net=float(form.get("manual_net")) if form.get("manual_net") else None,
+            forklift_collection=form.get("forklift_collection") if form.get("forklift_collection") in FORKLIFT else None,
+            forklift_delivery=form.get("forklift_delivery") if form.get("forklift_delivery") in FORKLIFT else None,
         )
         try:
             order.est_miles = float(form["cost_miles"]) if form.get("cost_miles") else None
@@ -561,13 +579,30 @@ def register_routes(app):
             db.session.add(OrderBox(order_id=order.id, kind="parcel", label_index=i,
                                      barcode=gen_barcode(order.reference, "parcel", i)))
 
-        try:
-            q = quote_for_order(order, customer, surcharges=read_surcharges(form))
-            if q.get("ok"):
-                order.price_net, order.price_vat = q["net"], q["vat"]
-                order.quoted_price, order.price_basis = q["total"], q["basis"]
-        except Exception:
-            pass
+        if price_override:   # e.g. the price agreed on a quote
+            order.price_net, order.price_vat = price_override["net"], price_override["vat"]
+            order.quoted_price, order.price_basis = price_override["total"], price_override["basis"]
+        else:
+            try:
+                q = quote_for_order(order, customer, surcharges=read_surcharges(form))
+                if q.get("ok"):
+                    order.price_net, order.price_vat = q["net"], q["vat"]
+                    order.quoted_price, order.price_basis = q["total"], q["basis"]
+            except Exception:
+                pass
+
+        # "Save this address for the customer" ticks on the booking form
+        for kind in ("delivery", "collection"):
+            if form.get(f"save_{kind}_address") == "on" and not multidrop:
+                addr = (form.get(f"{kind}_address") or "").strip()
+                pc = (form.get(f"{kind}_postcode") or "").strip().upper()
+                if addr and pc and not CustomerAddress.query.filter_by(
+                        customer_id=customer.id, address=addr, postcode=pc).first():
+                    db.session.add(CustomerAddress(
+                        customer_id=customer.id, address=addr, postcode=pc,
+                        label=(form.get(f"save_{kind}_label") or "").strip() or addr.split(",")[0][:80],
+                        contact_name=form.get("contact_name") if kind == "delivery" else None,
+                        contact_phone=form.get("contact_phone") if kind == "delivery" else None))
 
         db.session.commit()
         try:
@@ -595,7 +630,9 @@ def register_routes(app):
         extras = sum(s.amount for s in order.surcharges)
         cost_view = job_cost_view(order, order.customer.pricing_mode if order.customer else None,
                                   (order.price_net or 0) + extras)
+        from_quote = Quote.query.filter_by(order_id=order.id).first()
         return render_template("order_detail.html", order=order, surcharges=surcharges, cost_view=cost_view,
+                                from_quote=from_quote,
                                 status_labels=STATUS_LABELS, statuses=STATUSES,
                                 drivers=drivers, vehicles=vehicles)
 
@@ -794,12 +831,14 @@ def register_routes(app):
                    "goods_category", "goods_description", "quantity_summary", "full_pallets",
                    "half_pallets", "parcels", "weight_per_pallet_kg", "priority", "timing",
                    "collection_date", "collection_time", "delivery_date", "delivery_time",
-                   "cod_amount", "wl_vehicle", "wl_miles", "wl_after6", "manual_net", "notes"]
+                   "cod_amount", "wl_vehicle", "wl_miles", "wl_after6", "manual_net", "notes",
+                   "forklift_collection", "forklift_delivery"]
     EDIT_LABELS = {"customer_id": "customer", "full_pallets": "pallets", "half_pallets": "half pallets",
                    "parcels": "other items", "quantity_summary": "quantity description",
                    "weight_per_pallet_kg": "weight", "cod_amount": "cash on delivery",
                    "wl_vehicle": "vehicle", "wl_miles": "round-trip miles", "wl_after6": "after 6pm",
-                   "manual_net": "agreed price"}
+                   "manual_net": "agreed price", "forklift_collection": "forklift at collection",
+                   "forklift_delivery": "forklift at delivery"}
 
     @app.route("/orders/<int:order_id>/edit", methods=["GET", "POST"])
     @login_required
@@ -878,6 +917,8 @@ def register_routes(app):
             "wl_after6": (f.get("wl_after6") == "on") if "wl_vehicle" in f else order.wl_after6,
             "manual_net": num("manual_net", default=None) if "manual_net" in f else order.manual_net,
             "notes": (f.get("notes") or "").strip() or None,
+            "forklift_collection": f.get("forklift_collection") if f.get("forklift_collection") in FORKLIFT else None,
+            "forklift_delivery": f.get("forklift_delivery") if f.get("forklift_delivery") in FORKLIFT else None,
         }
         summary = (f.get("quantity_summary") or "").strip()
         if counts_changed and summary == (order.quantity_summary or ""):
@@ -1892,6 +1933,301 @@ def register_routes(app):
         customers = Customer.query.order_by(Customer.name).all()
         return render_template("rate_calculator.html", tiers=TIERS, customers=customers)
 
+    # ------------------------------------------------------------------
+    # Saved customer addresses
+    # ------------------------------------------------------------------
+    @app.route("/customers/<int:customer_id>/addresses", methods=["POST"])
+    @login_required
+    def customer_address_add(customer_id):
+        require_role("admin", "dispatcher")
+        c = Customer.query.get_or_404(customer_id)
+        address = (request.form.get("address") or "").strip()
+        postcode = (request.form.get("postcode") or "").strip().upper()
+        if not address or not postcode:
+            flash("Enter both an address and a postcode to save it.", "error")
+        elif CustomerAddress.query.filter_by(customer_id=c.id, address=address, postcode=postcode).first():
+            flash("That address is already saved for " + c.name + ".", "error")
+        else:
+            db.session.add(CustomerAddress(
+                customer_id=c.id, address=address, postcode=postcode,
+                label=(request.form.get("label") or "").strip() or address.split(",")[0][:80],
+                contact_name=(request.form.get("contact_name") or "").strip() or None,
+                contact_phone=(request.form.get("contact_phone") or "").strip() or None,
+                notes=(request.form.get("notes") or "").strip() or None))
+            db.session.commit()
+            flash(f"Address saved for {c.name}.", "success")
+        return redirect(request.form.get("next") or url_for("customers_list") + f"#addr-{c.id}")
+
+    @app.route("/customers/<int:customer_id>/addresses/<int:address_id>/delete", methods=["POST"])
+    @login_required
+    def customer_address_delete(customer_id, address_id):
+        require_role("admin", "dispatcher")
+        a = CustomerAddress.query.filter_by(id=address_id, customer_id=customer_id).first_or_404()
+        db.session.delete(a)
+        db.session.commit()
+        flash("Saved address removed.", "success")
+        return redirect(url_for("customers_list") + f"#addr-{customer_id}")
+
+    # ------------------------------------------------------------------
+    # Quotes - spot rates / new customers, compared across every rate card
+    # ------------------------------------------------------------------
+    QUOTE_VALID_DAYS = 14
+
+    def _gen_quote_ref():
+        while True:
+            ref = "Q-" + datetime.utcnow().strftime("%y%m%d") + "-" + "".join(
+                random.choices(string.ascii_uppercase + string.digits, k=4))
+            if not Quote.query.filter_by(reference=ref).first():
+                return ref
+
+    def _quote_options(q):
+        """Every rate card + the spot rate (if one's entered), with margins."""
+        when = _booked_uk(q) if q.created_at else None
+        comp = tier_comparison(q, "pallet", q.est_miles, now=when)
+        opts = []
+        for r in comp["rows"]:
+            opts.append({"key": r["tier"], "label": r["tier"] + " rate card", **r})
+        if q.spot_net:
+            net = round(q.spot_net, 2)
+            opts.append({"key": "spot", "label": "Spot rate", "ok": True, "net": net,
+                         "vat": round(net * pricing.VAT, 2), "total": round(net * (1 + pricing.VAT), 2),
+                         "basis": "Spot rate", "reason": None, "notes": [],
+                         "margin": pricing.margin(net, comp["cost_total"]) if comp["cost_total"] is not None else None})
+        return opts, comp
+
+    def _apply_quote_price(q):
+        """Store the chosen option's price on the quote (Standard by default)."""
+        opts, comp = _quote_options(q)
+        chosen = next((o for o in opts if o["key"] == q.price_option), None)
+        if q.price_option == "spot" and not q.spot_net:
+            chosen = None
+        if chosen and chosen["ok"]:
+            q.price_net, q.price_vat, q.price_total = round(chosen["net"], 2), round(chosen["vat"], 2), round(chosen["total"], 2)
+            q.price_basis = chosen["basis"] if q.price_option == "spot" else "%s (%s rate card)" % (chosen["basis"], q.price_option)
+        else:
+            q.price_net = q.price_vat = q.price_total = None
+            q.price_basis = None
+        return opts, comp
+
+    def _quote_checklist(q):
+        """(label, done, required) - what's needed before the quote can be booked.
+        New customers need the full set; existing customers just the booking basics."""
+        new = q.is_new_customer
+        has_weight = bool((q.weight_per_pallet_kg or 0) > 0 or (q.total_weight_kg or 0) > 0)
+        return [
+            ("Customer / company name", bool(q.customer_id or (q.company_name or "").strip()), True),
+            ("Contact name", bool((q.contact_name or "").strip()), new),
+            ("Contact phone", bool((q.contact_phone or "").strip()), new),
+            ("Number of pallets", bool((q.full_pallets or 0) + (q.half_pallets or 0) > 0), True),
+            ("Collection postcode", bool((q.collection_postcode or "").strip()), new),
+            ("Delivery address", bool((q.delivery_address or "").strip()), True),
+            ("Delivery postcode", bool((q.delivery_postcode or "").strip()), True),
+            ("Weight (per pallet or total)", has_weight, new),
+            ("Forklift at collection? (yes/no)", q.forklift_collection in FORKLIFT, new),
+            ("Forklift at delivery? (yes/no)", q.forklift_delivery in FORKLIFT, new),
+            ("Delivery date", bool(q.delivery_date), True),
+            ("A price chosen", q.price_net is not None, True),
+        ]
+
+    def _quote_from_form(q, f):
+        def num(name, cast=float):
+            raw = (f.get(name) or "").strip()
+            try:
+                v = cast(raw) if raw else None
+            except ValueError:
+                return None
+            return v if (v is None or v >= 0) else None
+        cid = f.get("customer_id", type=int)
+        q.customer_id = cid if cid and Customer.query.get(cid) else None
+        for k in ("company_name", "contact_name", "contact_email", "contact_phone", "collection_address",
+                  "delivery_address", "goods_description", "notes"):
+            setattr(q, k, (f.get(k) or "").strip() or None)
+        q.collection_postcode = (f.get("collection_postcode") or "").strip().upper() or None
+        q.delivery_postcode = (f.get("delivery_postcode") or "").strip().upper() or None
+        q.job_type = f.get("job_type") if f.get("job_type") in ("delivery", "collection") else "delivery"
+        q.full_pallets = num("full_pallets", int) or 0
+        q.half_pallets = num("half_pallets", int) or 0
+        q.weight_per_pallet_kg = num("weight_per_pallet_kg")
+        q.total_weight_kg = num("total_weight_kg")
+        q.forklift_collection = f.get("forklift_collection") if f.get("forklift_collection") in FORKLIFT else None
+        q.forklift_delivery = f.get("forklift_delivery") if f.get("forklift_delivery") in FORKLIFT else None
+        q.timing = "same_day" if f.get("timing") == "same_day" else "48h"
+        q.collection_date = _parse_date(f.get("collection_date"))
+        q.delivery_date = _parse_date(f.get("delivery_date"))
+        q.valid_until = _parse_date(f.get("valid_until")) or q.valid_until
+        q.spot_net = num("spot_net")
+        q.est_miles = num("est_miles")
+        opt = f.get("price_option") or "Standard"
+        q.price_option = opt if (opt in TIERS or opt == "spot") else "Standard"
+
+    @app.route("/quotes")
+    @login_required
+    def quotes_list():
+        require_role("admin", "dispatcher")
+        show = request.args.get("show", "open")
+        qry = Quote.query
+        if show == "open":
+            qry = qry.filter(Quote.status.in_(["draft", "sent"]))
+        elif show in Quote.STATUSES:
+            qry = qry.filter(Quote.status == show)
+        quotes = qry.order_by(Quote.created_at.desc()).limit(200).all()
+        counts = {k: Quote.query.filter_by(status=k).count() for k in Quote.STATUSES}
+        return render_template("quotes.html", quotes=quotes, show=show, counts=counts)
+
+    def _render_quote(q, status=200):
+        opts, comp = _quote_options(q)
+        customers = Customer.query.order_by(Customer.name).all()
+        addresses = {c.id: [a.as_dict() for a in c.addresses] for c in customers}
+        checklist = _quote_checklist(q) if q.id else []
+        ready = all(done for _, done, req in checklist if req) if checklist else False
+        return render_template("quote_form.html", q=q, options=opts, comp=comp, customers=customers,
+                                addresses=addresses, checklist=checklist, ready=ready, tiers=TIERS,
+                                today=date.today().isoformat()), status
+
+    @app.route("/quotes/new", methods=["GET", "POST"])
+    @login_required
+    def quote_new():
+        require_role("admin", "dispatcher")
+        q = Quote(price_option="Standard", job_type="delivery", timing="48h",
+                  valid_until=date.today() + timedelta(days=QUOTE_VALID_DAYS))
+        if request.method == "POST":
+            _quote_from_form(q, request.form)
+            q.reference = _gen_quote_ref()
+            q.created_by_id = current_user.id
+            q.created_at = datetime.utcnow()
+            if not q.customer_id and not q.company_name:
+                flash("Pick an existing customer or enter the company name.", "error")
+                q.id = None
+                return _render_quote(q, 400)
+            db.session.add(q)
+            db.session.flush()
+            _apply_quote_price(q)
+            db.session.commit()
+            flash(f"Quote {q.reference} saved.", "success")
+            return redirect(url_for("quote_detail", quote_id=q.id))
+        cid = request.args.get("customer_id", type=int)
+        if cid:
+            q.customer_id = cid
+            q.customer = Customer.query.get(cid)
+        return _render_quote(q)
+
+    @app.route("/quotes/<int:quote_id>", methods=["GET", "POST"])
+    @login_required
+    def quote_detail(quote_id):
+        require_role("admin", "dispatcher")
+        q = Quote.query.get_or_404(quote_id)
+        if request.method == "POST":
+            if q.status == "accepted":
+                flash("This quote has already been booked - edit the job instead.", "error")
+                return redirect(url_for("quote_detail", quote_id=q.id))
+            _quote_from_form(q, request.form)
+            if not q.customer_id and not q.company_name:
+                flash("Pick an existing customer or enter the company name.", "error")
+                db.session.rollback()
+                return redirect(url_for("quote_detail", quote_id=quote_id))
+            _apply_quote_price(q)
+            db.session.commit()
+            flash(f"Quote {q.reference} saved.", "success")
+            return redirect(url_for("quote_detail", quote_id=q.id))
+        return _render_quote(q)
+
+    @app.route("/quotes/<int:quote_id>/status", methods=["POST"])
+    @login_required
+    def quote_set_status(quote_id):
+        require_role("admin", "dispatcher")
+        q = Quote.query.get_or_404(quote_id)
+        st = request.form.get("status")
+        if q.status == "accepted":
+            flash("Booked quotes can't change status.", "error")
+        elif st in ("draft", "sent", "declined"):
+            q.status = st
+            db.session.commit()
+            flash(f"Quote {q.reference} marked as {Quote.STATUSES[st].lower()}.", "success")
+        return redirect(url_for("quote_detail", quote_id=q.id))
+
+    @app.route("/quotes/<int:quote_id>/confirm", methods=["POST"])
+    @login_required
+    def quote_confirm(quote_id):
+        """Turn a quote into a confirmed booking - only once every required
+        detail is known. New customers are created on the chosen rate card."""
+        require_role("admin", "dispatcher")
+        q = Quote.query.get_or_404(quote_id)
+        if q.status == "accepted" and q.order_id:
+            return redirect(url_for("order_detail", order_id=q.order_id))
+        if request.form.get("from_editor"):   # "Save & book" - keep what was just typed
+            _quote_from_form(q, request.form)
+            if not q.customer_id and not q.company_name:
+                db.session.rollback()
+                flash("Pick an existing customer or enter the company name.", "error")
+                return redirect(url_for("quote_detail", quote_id=quote_id))
+        _apply_quote_price(q)
+        missing = [label for label, done, req in _quote_checklist(q) if req and not done]
+        if missing:
+            db.session.commit()
+            flash("Can't book this yet - still needed: " + ", ".join(missing) + ".", "error")
+            return redirect(url_for("quote_detail", quote_id=q.id))
+        customer = q.customer
+        if customer is None:
+            name = q.company_name.strip()
+            if Customer.query.filter(db.func.lower(Customer.name) == name.lower()).first():
+                flash(f"A customer called '{name}' already exists - pick them from the customer list on this quote.", "error")
+                return redirect(url_for("quote_detail", quote_id=q.id))
+            customer = Customer(name=name, email=q.contact_email, phone=q.contact_phone,
+                                pricing_mode="custom" if q.price_option == "spot" else "pallet",
+                                tier=q.price_option if q.price_option in TIERS else "Standard")
+            db.session.add(customer)
+            db.session.flush()
+            new_customer = True
+        else:
+            new_customer = False
+        pallets = (q.full_pallets or 0) + (q.half_pallets or 0)
+        per_pallet = q.weight_per_pallet_kg or ((q.total_weight_kg or 0) / pallets if pallets else 0)
+        notes = [q.notes] if q.notes else []
+        if q.total_weight_kg:
+            notes.append("Total weight %g kg" % q.total_weight_kg)
+        from werkzeug.datastructures import MultiDict
+        form = MultiDict([
+            ("customer_id", str(customer.id)), ("job_type", q.job_type or "delivery"),
+            ("collection_address", q.collection_address or ""), ("collection_postcode", q.collection_postcode or ""),
+            ("delivery_address", q.delivery_address or ""), ("delivery_postcode", q.delivery_postcode or ""),
+            ("contact_name", q.contact_name or ""), ("contact_phone", q.contact_phone or ""),
+            ("goods_description", q.goods_description or ""), ("notes", "\n".join(notes)),
+            ("weight_per_pallet_kg", str(round(per_pallet, 1))), ("timing", q.timing or "48h"),
+            ("collection_date", q.collection_date.isoformat() if q.collection_date else ""),
+            ("delivery_date", q.delivery_date.isoformat() if q.delivery_date else ""),
+            ("forklift_collection", q.forklift_collection or ""), ("forklift_delivery", q.forklift_delivery or ""),
+            ("cost_miles", str(q.est_miles) if q.est_miles else ""),
+            ("manual_net", str(q.price_net) if q.price_option == "spot" else ""),
+        ])
+        if q.full_pallets:
+            form.add("qty_value", str(q.full_pallets)); form.add("qty_unit", "Pallet")
+        if q.half_pallets:
+            form.add("qty_value", str(q.half_pallets)); form.add("qty_unit", "Half pallet")
+        basis = "Quote %s - %s" % (q.reference, q.price_basis)
+        order = _create_order_from_form(form, price_override={
+            "net": q.price_net, "vat": q.price_vat, "total": q.price_total, "basis": basis[:200]})
+        log_event(order, order.status, "Booked from quote %s" % q.reference)
+        q.status, q.order_id = "accepted", order.id
+        q.customer_id = customer.id
+        db.session.commit()
+        flash(f"Quote {q.reference} booked as {order.reference}" +
+              (f" - new customer '{customer.name}' created on the "
+               f"{'custom (spot)' if customer.pricing_mode == 'custom' else customer.tier} pricing." if new_customer else "."),
+              "success")
+        return redirect(url_for("order_detail", order_id=order.id))
+
+    @app.route("/api/quote-compare", methods=["POST"])
+    @login_required
+    def api_quote_compare():
+        """Live comparison for the quote page while it's being filled in."""
+        require_role("admin", "dispatcher")
+        from werkzeug.datastructures import MultiDict
+        q = Quote(created_at=None)
+        _quote_from_form(q, MultiDict(request.get_json(force=True) or {}))
+        opts, comp = _quote_options(q)
+        return jsonify({"options": opts, "cost_total": comp["cost_total"], "miles": comp["miles"],
+                        "miles_note": comp["miles_note"]})
+
     @app.route("/api/quote", methods=["POST"])
     @login_required
     def api_quote():
@@ -1932,6 +2268,12 @@ def register_routes(app):
                                            miles=float(cm) if cm not in (None, "") else None)
             except Exception as exc:  # never let the cost view break quoting
                 q["cost"] = {"miles": None, "note": "cost estimate unavailable (%s)" % exc}
+        try:
+            cm = data.get("cost_miles")
+            q["compare"] = tier_comparison(stub, "pallet", float(cm) if cm not in (None, "") else None)
+            q["compare"]["customer_tier"] = sc.tier if sc.pricing_mode == "pallet" else None
+        except Exception as exc:
+            q["compare"] = {"rows": [], "error": str(exc)}
         return jsonify(q)
 
     @app.route("/invoices")

@@ -143,3 +143,26 @@ def quote_for_order(order, customer, surcharges=None, now=None):
         q["vat"] = round(q["vat"], 2)
         q["total"] = round(q["total"], 2)
     return q
+
+
+class _TierCustomer:
+    """Stand-in customer on a given rate-card tier, used for comparisons."""
+    pricing_mode = "pallet"
+    discount_pct = 0
+    flat_rate_per_pallet = 25
+
+    def __init__(self, tier):
+        self.tier = tier
+
+
+def compare_tiers(job, now=None):
+    """What this job would cost on each rate-card tier (Standard, Trade, Key,
+    Major). Same postcodes, pallets and same-day rules as a normal quote.
+    Returns a list of dicts: tier, ok, net, vat, total, basis, reason."""
+    out = []
+    for tier in TIERS:
+        q = quote_for_order(job, _TierCustomer(tier), now=now)
+        out.append({"tier": tier, "ok": bool(q.get("ok")), "net": q.get("net"), "vat": q.get("vat"),
+                    "total": q.get("total"), "basis": q.get("basis"), "band": q.get("band"),
+                    "reason": q.get("reason"), "notes": q.get("notes") or []})
+    return out

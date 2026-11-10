@@ -76,6 +76,74 @@ class Vehicle(db.Model):
         return " - ".join(x for x in (size, self.vehicle_type) if x)
 
 
+class Quote(db.Model):
+    """A price quote, e.g. a spot rate for a new customer. It can be saved with
+    partial details, compared across every rate card, then confirmed into a
+    booking once the required details are known."""
+    __tablename__ = "quotes"
+    id = db.Column(db.Integer, primary_key=True)
+    reference = db.Column(db.String(30), unique=True, nullable=False)
+    status = db.Column(db.String(15), default="draft")   # draft | sent | accepted | declined
+    created_at = db.Column(db.DateTime, default=now)
+    updated_at = db.Column(db.DateTime, default=now, onupdate=now)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    valid_until = db.Column(db.Date)
+
+    # Who it's for: an existing customer, or a new one (company details below)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True)
+    company_name = db.Column(db.String(255))
+    contact_name = db.Column(db.String(120))
+    contact_email = db.Column(db.String(255))
+    contact_phone = db.Column(db.String(50))
+
+    job_type = db.Column(db.String(20), default="delivery")   # delivery | collection
+    collection_address = db.Column(db.String(500))
+    collection_postcode = db.Column(db.String(12))
+    delivery_address = db.Column(db.String(500))
+    delivery_postcode = db.Column(db.String(12))
+    full_pallets = db.Column(db.Integer, default=0)
+    half_pallets = db.Column(db.Integer, default=0)
+    weight_per_pallet_kg = db.Column(db.Float)
+    total_weight_kg = db.Column(db.Float)
+    forklift_collection = db.Column(db.String(10))   # yes | no | None (unknown)
+    forklift_delivery = db.Column(db.String(10))
+    timing = db.Column(db.String(20), default="48h")  # 48h | same_day
+    collection_date = db.Column(db.Date)
+    delivery_date = db.Column(db.Date)
+    goods_description = db.Column(db.String(255))
+    notes = db.Column(db.Text)
+
+    # The price chosen: a rate card tier ("Standard", "Trade", "Key", "Major") or "spot"
+    price_option = db.Column(db.String(20), default="Standard")
+    spot_net = db.Column(db.Float)
+    price_net = db.Column(db.Float)
+    price_vat = db.Column(db.Float)
+    price_total = db.Column(db.Float)
+    price_basis = db.Column(db.String(200))
+    est_miles = db.Column(db.Float)
+
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=True)
+
+    customer = db.relationship("Customer")
+    order = db.relationship("Order")
+    created_by = db.relationship("User")
+
+    STATUSES = {"draft": "Draft", "sent": "Sent", "accepted": "Booked", "declined": "Declined"}
+
+    @property
+    def display_name(self):
+        return self.customer.name if self.customer else (self.company_name or "New customer")
+
+    @property
+    def is_new_customer(self):
+        return self.customer_id is None
+
+    @property
+    def expired(self):
+        from datetime import date as _d
+        return bool(self.valid_until and self.valid_until < _d.today() and self.status in ("draft", "sent"))
+
+
 class CostSettings(db.Model):
     """Heliolink's own running-cost inputs for the margin view (one row, edited
     on Billing -> Cost & margin settings). Never shown to customers."""
@@ -144,6 +212,29 @@ class Customer(db.Model):
     zone = db.relationship("Zone")
 
 
+class CustomerAddress(db.Model):
+    """A customer's regular collection/delivery address, picked from a list
+    when booking instead of typing it out every time."""
+    __tablename__ = "customer_addresses"
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=False, index=True)
+    label = db.Column(db.String(80))          # e.g. "Tesco DC Daventry"
+    address = db.Column(db.String(500), nullable=False)
+    postcode = db.Column(db.String(12), nullable=False)
+    contact_name = db.Column(db.String(120))
+    contact_phone = db.Column(db.String(50))
+    notes = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=now)
+
+    customer = db.relationship("Customer", backref=db.backref(
+        "addresses", order_by="CustomerAddress.label", cascade="all, delete-orphan"))
+
+    def as_dict(self):
+        return {"id": self.id, "label": self.label or self.postcode, "address": self.address,
+                "postcode": self.postcode, "contact_name": self.contact_name or "",
+                "contact_phone": self.contact_phone or "", "notes": self.notes or ""}
+
+
 # ---------------------------------------------------------------------------
 # Orders / shipments
 # ---------------------------------------------------------------------------
@@ -188,6 +279,9 @@ class Order(db.Model):
     manual_net = db.Column(db.Float)
     # Our-cost view: miles we expect to drive for this job (estimated at booking, editable)
     est_miles = db.Column(db.Float)
+    # Is there a forklift on site? "yes" | "no" | None (not known)
+    forklift_collection = db.Column(db.String(10))
+    forklift_delivery = db.Column(db.String(10))
 
     collection_date = db.Column(db.Date)
     collection_time = db.Column(db.String(10))

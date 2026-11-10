@@ -19,17 +19,34 @@
       </select>
     </div>
   </div>
+  <div class="row d-none" id="savedPickRow">
+    <div class="col-12 mb-3"><label class="form-label">Saved addresses for this customer</label>
+      <div class="d-flex gap-2 flex-wrap">
+        <select class="form-select" id="savedAddr" style="max-width:420px"><option value="">Pick a saved address…</option></select>
+        <button type="button" class="btn btn-outline-secondary" data-target="collection">Use for collection</button>
+        <button type="button" class="btn btn-outline-secondary" data-target="delivery">Use for delivery</button>
+      </div></div>
+  </div>
   <div class="row">
-    <div class="col-md-8 mb-3"><label class="form-label">Collection address</label>
+    <div class="col-md-8 mb-1"><label class="form-label">Collection address</label>
       <input class="form-control" name="collection_address"></div>
-    <div class="col-md-4 mb-3"><label class="form-label">Collection postcode</label>
+    <div class="col-md-4 mb-1"><label class="form-label">Collection postcode</label>
       <input class="form-control" name="collection_postcode"></div>
+    <div class="col-12 mb-3"><div class="form-check small">
+      <input class="form-check-input" type="checkbox" name="save_collection_address" id="saveColl">
+      <label class="form-check-label text-muted" for="saveColl">Save this collection address for the customer</label></div></div>
   </div>
   <div class="row" id="singleDestRow">
     <div class="col-md-8 mb-3"><label class="form-label">Delivery address *</label>
       <input class="form-control" name="delivery_address" id="deliveryAddress" required></div>
     <div class="col-md-4 mb-3"><label class="form-label">Delivery postcode *</label>
       <input class="form-control" name="delivery_postcode" id="deliveryPostcode" required placeholder="e.g. M1 1AA"></div>
+    <div class="col-12 mb-3 d-flex flex-wrap align-items-center gap-2 small" style="margin-top:-8px">
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="save_delivery_address" id="saveDel">
+        <label class="form-check-label text-muted" for="saveDel">Save this delivery address for the customer</label></div>
+      <input class="form-control form-control-sm" style="max-width:260px" name="save_delivery_label" placeholder="Name it, e.g. Tesco DC Daventry (optional)">
+    </div>
   </div>
   <div class="row d-none" id="multidropRow">
     <div class="col-md-12 mb-3"><label class="form-label">Round / region name</label>
@@ -75,6 +92,12 @@
       <input type="date" class="form-control" name="delivery_date" value="{{ preselect_date }}"></div>
     <div class="col-md-4 mb-3"><label class="form-label">Cash on delivery (£, optional)</label>
       <input type="number" step="0.01" min="0" class="form-control" name="cod_amount" value="0"></div>
+  </div>
+  <div class="row">
+    <div class="col-md-6 mb-3"><label class="form-label">Forklift on site at collection?</label>
+      <select class="form-select" name="forklift_collection"><option value="">Not known</option><option value="yes">Yes</option><option value="no">No</option></select></div>
+    <div class="col-md-6 mb-3"><label class="form-label">Forklift on site at delivery?</label>
+      <select class="form-select" name="forklift_delivery"><option value="">Not known</option><option value="yes">Yes</option><option value="no">No</option></select></div>
   </div>
 
   <div id="wavelengthFields" class="d-none row border rounded p-2 mb-3 bg-light">
@@ -156,9 +179,51 @@ function toggleModeFields() {
 }
 customerSelect.addEventListener("change", toggleModeFields);
 toggleModeFields();
+
+// Saved addresses for the selected customer
+var ADDRESSES = {{ addresses|tojson }};
+var orderForm = document.getElementById("orderForm");
+function loadSavedAddresses() {
+  var list = ADDRESSES[customerSelect.value] || [];
+  document.getElementById("savedPickRow").classList.toggle("d-none", !list.length);
+  document.getElementById("savedAddr").innerHTML = '<option value="">Pick a saved address…</option>' +
+    list.map(function(a, i) { return '<option value="' + i + '">' + a.label + ' – ' + a.postcode + '</option>'; }).join("");
+}
+document.querySelectorAll("#savedPickRow button").forEach(function(btn) {
+  btn.addEventListener("click", function() {
+    var a = (ADDRESSES[customerSelect.value] || [])[document.getElementById("savedAddr").value];
+    if (!a) return;
+    var t = btn.dataset.target;
+    orderForm.elements[t + "_address"].value = a.address;
+    orderForm.elements[t + "_postcode"].value = a.postcode;
+    if (t === "delivery") {
+      if (a.contact_name) orderForm.elements.contact_name.value = a.contact_name;
+      if (a.contact_phone) orderForm.elements.contact_phone.value = a.contact_phone;
+      if (a.notes && !orderForm.elements.notes.value) orderForm.elements.notes.value = a.notes;
+    }
+  });
+});
+customerSelect.addEventListener("change", loadSavedAddresses);
+loadSavedAddresses();
 toggleMultidrop();
 
 function fmt(n) { return "£" + Number(n).toFixed(2); }
+function compareBlock(cmp, ownNet) {
+  if (!cmp || !cmp.rows || !cmp.rows.some(function(r) { return r.ok; })) return "";
+  var h = '<div class="border-top pt-2 mt-2"><h6 class="mb-1">Rate card comparison</h6>' +
+          '<div class="text-muted small mb-1">What this job would cost on each account tier.</div>' +
+          '<table class="table table-sm mb-1"><tr class="small text-muted"><th>Tier</th><th class="text-end">Ex VAT</th><th class="text-end">vs this quote</th><th class="text-end">Margin</th></tr>';
+  cmp.rows.forEach(function(r) {
+    if (!r.ok) { h += '<tr><td>' + r.tier + '</td><td colspan="3" class="small text-muted">' + (r.reason || "-") + '</td></tr>'; return; }
+    var diff = (ownNet != null) ? r.net - ownNet : null;
+    var mine = cmp.customer_tier === r.tier;
+    h += '<tr' + (mine ? ' class="table-warning"' : '') + '><td>' + r.tier + (mine ? ' <span class="small">(theirs)</span>' : '') + '</td>' +
+         '<td class="text-end">' + fmt(r.net) + '</td>' +
+         '<td class="text-end small">' + (diff == null ? '' : (Math.abs(diff) < 0.005 ? 'same' : (diff > 0 ? '+' : '−') + fmt(Math.abs(diff)))) + '</td>' +
+         '<td class="text-end small">' + (r.margin ? Math.round(r.margin.pct) + '%' : '—') + '</td></tr>';
+  });
+  return h + '</table></div>';
+}
 function costBlock(c) {
   if (!c) return "";
   var h = '<div class="border-top pt-2 mt-2"><h6 class="mb-1">Our cost &amp; margin <span class="text-muted small fw-normal">(internal)</span></h6>';
@@ -221,7 +286,7 @@ function getQuote() {
     body: JSON.stringify(payload)
   }).then(r => r.json()).then(function(q) {
     var box = document.getElementById("quoteResult");
-    if (!q.ok) { box.innerHTML = '<div class="alert alert-warning small mb-0">' + (q.reason || "Can't price this yet.") + '</div>'; return; }
+    if (!q.ok) { box.innerHTML = '<div class="alert alert-warning small mb-0">' + (q.reason || "Can't price this yet.") + '</div>' + compareBlock(q.compare, null); return; }
     var lines = (q.lines || []).map(function(l) {
       return '<tr><td>' + l[0] + '</td><td class="text-end">£' + l[1].toFixed(2) + '</td></tr>';
     }).join("");
@@ -233,7 +298,7 @@ function getQuote() {
       '<tr><th>Net</th><td class="text-end">£' + q.net.toFixed(2) + '</td></tr>' +
       '<tr><th>VAT</th><td class="text-end">£' + q.vat.toFixed(2) + '</td></tr>' +
       '<tr><th>Total</th><td class="text-end"><b>£' + q.total.toFixed(2) + '</b></td></tr></table>' +
-      costBlock(q.cost);
+      costBlock(q.cost) + compareBlock(q.compare, q.net);
     if (q.cost && q.cost.miles != null) document.getElementById("costMiles").value = q.cost.miles;
     wireCostMiles();
   });

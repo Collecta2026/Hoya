@@ -1,0 +1,41 @@
+{% extends "base.html" %}{% block title %}Quotes{% endblock %}
+{% set qbadge = {'draft': 'bg-secondary', 'sent': 'bg-info text-dark', 'accepted': 'bg-success', 'declined': 'bg-danger'} %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div><h3 class="mb-0">Quotes</h3>
+    <div class="text-muted small">Price a job on every rate card (or a spot rate), then book it once the details are confirmed.</div></div>
+  <a class="btn btn-primary" href="{{ url_for('quote_new') }}">+ New quote</a>
+</div>
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item"><a class="nav-link {{ 'active' if show == 'open' }}" href="{{ url_for('quotes_list', show='open') }}">Open ({{ counts['draft'] + counts['sent'] }})</a></li>
+  {% for key, label in [('accepted', 'Booked'), ('declined', 'Declined'), ('all', 'All')] %}
+  <li class="nav-item"><a class="nav-link {{ 'active' if show == key }}" href="{{ url_for('quotes_list', show=key) }}">{{ label }}{% if key in counts %} ({{ counts[key] }}){% endif %}</a></li>
+  {% endfor %}
+</ul>
+<div class="card p-3">
+  <table class="table table-sm align-middle mb-0">
+    <thead><tr><th>Quote</th><th>Customer</th><th>Route</th><th>Pallets</th><th>Price option</th>
+      <th class="text-end">Price <span class="fw-normal text-muted small">(ex VAT)</span></th><th>Status</th><th>Valid until</th><th></th></tr></thead>
+    <tbody>
+    {% for q in quotes %}
+    <tr>
+      <td class="text-nowrap">{{ q.reference }}<div class="text-muted small">{{ q.created_at.strftime('%d %b') if q.created_at }}</div></td>
+      <td>{{ q.display_name }}{% if q.is_new_customer and q.status != 'accepted' %} <span class="badge bg-light text-dark border">New</span>{% endif %}</td>
+      <td class="small">{{ q.collection_postcode or 'Depot' }} → {{ q.delivery_postcode or '?' }}</td>
+      <td>{{ (q.full_pallets or 0) + (q.half_pallets or 0) }}</td>
+      <td class="small">{{ 'Spot rate' if q.price_option == 'spot' else q.price_option ~ ' rate card' }}</td>
+      <td class="text-end">{% if q.price_net is not none %}£{{ '%.2f'|format(q.price_net) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+      <td><span class="badge {{ qbadge.get(q.status, 'bg-secondary') }}">{{ q.STATUSES.get(q.status, q.status) }}</span>
+        {% if q.expired %}<span class="badge bg-warning text-dark">Expired</span>{% endif %}</td>
+      <td class="small">{{ q.valid_until.strftime('%d %b %Y') if q.valid_until else '—' }}</td>
+      <td class="text-end text-nowrap">
+        {% if q.order_id %}<a href="{{ url_for('order_detail', order_id=q.order_id) }}" class="me-2">{{ q.order.reference }}</a>{% endif %}
+        <a href="{{ url_for('quote_detail', quote_id=q.id) }}">Open</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="text-muted small">No quotes here yet. <a href="{{ url_for('quote_new') }}">Create one</a>.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

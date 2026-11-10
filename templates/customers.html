@@ -50,6 +50,8 @@
           </td>
           <td class="text-end text-nowrap">
             <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#edit-{{ c.id }}">Edit</button>
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#addr-{{ c.id }}">Addresses ({{ c.addresses|length }})</button>
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('quote_new', customer_id=c.id) }}">Quote</a>
             <a class="btn btn-sm btn-primary" href="{{ url_for('order_new', customer_id=c.id) }}">Place order</a>
           </td>
         </tr>
@@ -88,6 +90,29 @@
                 <button class="btn btn-sm btn-primary" type="submit">Save customer</button>
                 <button class="btn btn-sm btn-link" type="button" data-bs-toggle="collapse" data-bs-target="#edit-{{ c.id }}">Cancel</button>
               </div>
+            </form>
+          </td>
+        </tr>
+        <tr class="collapse" id="addr-{{ c.id }}">
+          <td colspan="4" class="bg-light">
+            <h6 class="mt-1 mb-2">Saved addresses for {{ c.name }} <span class="text-muted small fw-normal">— pick these on the booking form instead of typing them out</span></h6>
+            {% if c.addresses %}
+            <table class="table table-sm mb-2">
+              {% for a in c.addresses %}
+              <tr><td><b>{{ a.label or a.postcode }}</b><div class="small text-muted">{{ a.address }}, {{ a.postcode }}{% if a.contact_name %} · {{ a.contact_name }}{% endif %}{% if a.contact_phone %} {{ a.contact_phone }}{% endif %}{% if a.notes %} · {{ a.notes }}{% endif %}</div></td>
+                <td class="text-end"><form method="post" action="{{ url_for('customer_address_delete', customer_id=c.id, address_id=a.id) }}"
+                      onsubmit="return confirm('Remove this saved address?');"><button class="btn btn-sm btn-link text-danger p-0" type="submit">Remove</button></form></td></tr>
+              {% endfor %}
+            </table>
+            {% else %}<p class="small text-muted mb-2">None saved yet. Add one below, or tick "Save this address" when booking.</p>{% endif %}
+            <form method="post" action="{{ url_for('customer_address_add', customer_id=c.id) }}" class="row g-2">
+              <div class="col-sm-4"><input class="form-control form-control-sm" name="label" placeholder="Name, e.g. Tesco DC Daventry"></div>
+              <div class="col-sm-5"><input class="form-control form-control-sm" name="address" placeholder="Address *" required></div>
+              <div class="col-sm-3"><input class="form-control form-control-sm" name="postcode" placeholder="Postcode *" required style="text-transform:uppercase"></div>
+              <div class="col-sm-4"><input class="form-control form-control-sm" name="contact_name" placeholder="Site contact"></div>
+              <div class="col-sm-3"><input class="form-control form-control-sm" name="contact_phone" placeholder="Phone"></div>
+              <div class="col-sm-5"><input class="form-control form-control-sm" name="notes" placeholder="Notes, e.g. Goods in closes 2pm"></div>
+              <div class="col-12"><button class="btn btn-sm btn-primary" type="submit">Save address</button></div>
             </form>
           </td>
         </tr>

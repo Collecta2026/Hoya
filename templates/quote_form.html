@@ -1,0 +1,304 @@
+{% extends "base.html" %}{% block title %}{{ q.reference or 'New quote' }}{% endblock %}
+{% set qbadge = {'draft': 'bg-secondary', 'sent': 'bg-info text-dark', 'accepted': 'bg-success', 'declined': 'bg-danger'} %}
+{% set locked = q.status == 'accepted' %}
+{% macro fk(name, value) %}
+  <select class="form-select" name="{{ name }}">
+    <option value="" {{ 'selected' if value not in ('yes', 'no') }}>Not known yet</option>
+    <option value="yes" {{ 'selected' if value == 'yes' }}>Yes</option>
+    <option value="no" {{ 'selected' if value == 'no' }}>No</option>
+  </select>
+{% endmacro %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-0">{{ q.reference or 'New quote' }}
+      {% if q.id %}<span class="badge {{ qbadge.get(q.status, 'bg-secondary') }} fs-6 align-middle">{{ q.STATUSES.get(q.status, q.status) }}</span>
+      {% if q.expired %}<span class="badge bg-warning text-dark fs-6 align-middle">Expired</span>{% endif %}{% endif %}</h3>
+    {% if q.id %}<div class="text-muted small">Created {{ q.created_at.strftime('%d %b %Y %H:%M') }}{% if q.created_by %} by {{ q.created_by.name }}{% endif %}</div>{% endif %}
+  </div>
+  <div class="d-flex gap-2">
+    {% if q.order_id %}<a class="btn btn-success" href="{{ url_for('order_detail', order_id=q.order_id) }}">Open booking {{ q.order.reference }}</a>{% endif %}
+    <a class="btn btn-outline-secondary" href="{{ url_for('quotes_list') }}">All quotes</a>
+  </div>
+</div>
+
+<form method="post" id="quoteForm" action="{{ url_for('quote_detail', quote_id=q.id) if q.id else url_for('quote_new') }}">
+<input type="hidden" name="from_editor" value="1">
+<fieldset {{ 'disabled' if locked }}>
+<div class="row g-3">
+  <!-- ======================= JOB DETAILS ======================= -->
+  <div class="col-lg-7">
+    <div class="card p-4">
+      <h5>Customer</h5>
+      <div class="row">
+        <div class="col-md-6 mb-3"><label class="form-label">Customer</label>
+          <select class="form-select" name="customer_id" id="qCustomer">
+            <option value="">— New customer —</option>
+            {% for c in customers %}<option value="{{ c.id }}" {{ 'selected' if q.customer_id == c.id }}>{{ c.name }}</option>{% endfor %}
+          </select></div>
+        <div class="col-md-6 mb-3 new-only"><label class="form-label">Company name *</label>
+          <input class="form-control" name="company_name" value="{{ q.company_name or '' }}" placeholder="e.g. Acme Foods Ltd"></div>
+      </div>
+      <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label">Contact name <span class="new-req">*</span></label>
+          <input class="form-control" name="contact_name" value="{{ q.contact_name or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">Contact phone <span class="new-req">*</span></label>
+          <input class="form-control" name="contact_phone" value="{{ q.contact_phone or '' }}"></div>
+        <div class="col-md-4 mb-3 new-only"><label class="form-label">Contact email</label>
+          <input class="form-control" type="email" name="contact_email" value="{{ q.contact_email or '' }}"></div>
+      </div>
+
+      <h5 class="mt-2">Collection &amp; delivery</h5>
+      <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label">Job type</label>
+          <select class="form-select" name="job_type">
+            <option value="delivery" {{ 'selected' if q.job_type != 'collection' }}>Delivery</option>
+            <option value="collection" {{ 'selected' if q.job_type == 'collection' }}>Collection</option>
+          </select></div>
+        <div class="col-md-8 mb-3 saved-pick d-none"><label class="form-label">Saved addresses</label>
+          <div class="d-flex gap-2">
+            <select class="form-select" id="savedAddr"><option value="">Pick a saved address…</option></select>
+            <button type="button" class="btn btn-outline-secondary text-nowrap" data-target="collection">Use for collection</button>
+            <button type="button" class="btn btn-outline-secondary text-nowrap" data-target="delivery">Use for delivery</button>
+          </div></div>
+      </div>
+      <div class="row">
+        <div class="col-md-8 mb-3"><label class="form-label">Collection address</label>
+          <input class="form-control" name="collection_address" value="{{ q.collection_address or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">Collection postcode <span class="new-req">*</span></label>
+          <input class="form-control live" name="collection_postcode" value="{{ q.collection_postcode or '' }}" style="text-transform:uppercase"></div>
+      </div>
+      <div class="row">
+        <div class="col-md-8 mb-3"><label class="form-label">Delivery address *</label>
+          <input class="form-control" name="delivery_address" value="{{ q.delivery_address or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">Delivery postcode *</label>
+          <input class="form-control live" name="delivery_postcode" value="{{ q.delivery_postcode or '' }}" style="text-transform:uppercase"></div>
+      </div>
+
+      <h5 class="mt-2">Load</h5>
+      <div class="row">
+        <div class="col-md-3 mb-3"><label class="form-label">Pallets *</label>
+          <input class="form-control live" type="number" min="0" name="full_pallets" value="{{ q.full_pallets or 0 }}"></div>
+        <div class="col-md-3 mb-3"><label class="form-label">Half pallets</label>
+          <input class="form-control live" type="number" min="0" name="half_pallets" value="{{ q.half_pallets or 0 }}"></div>
+        <div class="col-md-3 mb-3"><label class="form-label">Weight per pallet (kg) <span class="new-req">*</span></label>
+          <input class="form-control" type="number" step="0.1" min="0" name="weight_per_pallet_kg" value="{{ q.weight_per_pallet_kg if q.weight_per_pallet_kg is not none else '' }}"></div>
+        <div class="col-md-3 mb-3"><label class="form-label">or total weight (kg)</label>
+          <input class="form-control" type="number" step="0.1" min="0" name="total_weight_kg" value="{{ q.total_weight_kg if q.total_weight_kg is not none else '' }}"></div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3"><label class="form-label">Forklift on site at collection? <span class="new-req">*</span></label>{{ fk('forklift_collection', q.forklift_collection) }}</div>
+        <div class="col-md-6 mb-3"><label class="form-label">Forklift on site at delivery? <span class="new-req">*</span></label>{{ fk('forklift_delivery', q.forklift_delivery) }}
+          <div class="form-text">No forklift? You'll need a tail-lift vehicle.</div></div>
+      </div>
+      <div class="row">
+        <div class="col-md-12 mb-3"><label class="form-label">Goods description</label>
+          <input class="form-control" name="goods_description" value="{{ q.goods_description or '' }}" placeholder="e.g. Boxed confectionery, stackable"></div>
+      </div>
+
+      <h5 class="mt-2">When</h5>
+      <div class="row">
+        <div class="col-md-3 mb-3"><label class="form-label">Service</label>
+          <select class="form-select live" name="timing">
+            <option value="48h" {{ 'selected' if q.timing != 'same_day' }}>Next day / 48h</option>
+            <option value="same_day" {{ 'selected' if q.timing == 'same_day' }}>Same day</option>
+          </select></div>
+        <div class="col-md-3 mb-3"><label class="form-label">Collection date</label>
+          <input class="form-control" type="date" name="collection_date" value="{{ q.collection_date.isoformat() if q.collection_date else '' }}"></div>
+        <div class="col-md-3 mb-3"><label class="form-label">Delivery date *</label>
+          <input class="form-control live" type="date" name="delivery_date" value="{{ q.delivery_date.isoformat() if q.delivery_date else '' }}"></div>
+        <div class="col-md-3 mb-3"><label class="form-label">Quote valid until</label>
+          <input class="form-control" type="date" name="valid_until" value="{{ q.valid_until.isoformat() if q.valid_until else '' }}"></div>
+      </div>
+      <div class="mb-1"><label class="form-label">Notes</label>
+        <textarea class="form-control" name="notes" rows="2">{{ q.notes or '' }}</textarea></div>
+      <div class="form-text"><span class="new-req">*</span> needed before a new customer's quote can be booked.</div>
+    </div>
+  </div>
+
+  <!-- ======================= PRICE OPTIONS ======================= -->
+  <div class="col-lg-5">
+    <div class="card p-3 mb-3">
+      <h5 class="mb-1">Price options</h5>
+      <p class="text-muted small mb-2">The Standard rate card is used unless you pick another tier or a spot rate.</p>
+      <table class="table table-sm align-middle mb-2" id="optTable">
+        <thead><tr><th></th><th>Option</th><th class="text-end">Ex VAT</th><th class="text-end">Inc VAT</th><th class="text-end">Margin</th></tr></thead>
+        <tbody id="optBody">
+        {% for o in options if o.key != 'spot' %}
+          <tr class="{{ 'table-warning' if q.price_option == o.key }}">
+            <td><input class="form-check-input" type="radio" name="price_option" value="{{ o.key }}" {{ 'checked' if q.price_option == o.key }} {{ 'disabled' if not o.ok }}></td>
+            <td>{{ o.label }}</td>
+            {% if o.ok %}
+            <td class="text-end">£{{ '%.2f'|format(o.net) }}</td><td class="text-end text-muted">£{{ '%.2f'|format(o.total) }}</td>
+            <td class="text-end">{% if o.margin %}<span class="{{ 'text-success' if o.margin.profit >= 0 else 'text-danger' }}">£{{ '%.2f'|format(o.margin.profit) }} ({{ '%.0f'|format(o.margin.pct) }}%)</span>{% else %}—{% endif %}</td>
+            {% else %}<td colspan="3" class="small text-muted">{{ o.reason or "Can't price yet" }}</td>{% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tbody>
+          {% set spot = options|selectattr('key', 'equalto', 'spot')|first %}
+          <tr class="{{ 'table-warning' if q.price_option == 'spot' }}" id="spotRow">
+            <td><input class="form-check-input" type="radio" name="price_option" value="spot" {{ 'checked' if q.price_option == 'spot' }}></td>
+            <td>Spot rate</td>
+            <td class="text-end" colspan="2"><div class="input-group input-group-sm justify-content-end">
+              <span class="input-group-text">£</span>
+              <input class="form-control live text-end" style="max-width:110px" type="number" step="0.01" min="0" name="spot_net" id="spotNet" value="{{ q.spot_net if q.spot_net is not none else '' }}" placeholder="ex VAT"></div></td>
+            <td class="text-end" id="spotMargin">{% if spot and spot.margin %}<span class="{{ 'text-success' if spot.margin.profit >= 0 else 'text-danger' }}">£{{ '%.2f'|format(spot.margin.profit) }} ({{ '%.0f'|format(spot.margin.pct) }}%)</span>{% else %}—{% endif %}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="small text-muted mb-2" id="bandNote">{% set first = options|first %}{% if first and first.ok %}{{ first.notes|join(' ') }}{% endif %}</div>
+      <div class="border rounded p-2 bg-light small">
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+          <span>Our cost:</span><b id="costTotal">{{ '£%.2f'|format(comp.cost_total) if comp.cost_total is not none else '—' }}</b>
+          <span>for</span>
+          <input class="form-control form-control-sm live" style="max-width:80px" type="number" min="0" step="1" name="est_miles" id="estMiles" value="{{ q.est_miles if q.est_miles is not none else (comp.miles if comp.miles is not none else '') }}">
+          <span>miles</span>
+        </div>
+        <div class="text-muted" id="milesNote">{{ comp.miles_note or '' }}</div>
+        <div class="d-flex align-items-center gap-2 flex-wrap mt-2">
+          <span>For a</span>
+          <input class="form-control form-control-sm" style="max-width:70px" type="number" min="0" max="95" step="1" id="targetPct" value="30">
+          <span>% margin, charge</span><b id="targetPrice">—</b>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="useTarget">Use as spot rate</button>
+        </div>
+      </div>
+    </div>
+
+    {% if q.id %}
+    <div class="card p-3 mb-3">
+      <h5 class="mb-2">Ready to book?</h5>
+      <ul class="list-unstyled small mb-2">
+        {% for label, done, required in checklist %}
+          {% if required or not done %}
+          <li class="{{ 'text-success' if done else ('text-danger' if required else 'text-muted') }}">{{ '✓' if done else ('✗' if required else '–') }} {{ label }}{% if not required and not done %} <span class="text-muted">(optional for existing customers)</span>{% endif %}</li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+      {% if not locked %}
+      <p class="small text-muted mb-0">{{ 'Everything needed is filled in.' if ready else 'Save the quote as you fill these in - it can only be booked once every ✗ is done.' }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if not locked %}
+    <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-primary" type="submit">Save quote</button>
+      {% if q.id %}
+      <button class="btn btn-success" type="submit" formaction="{{ url_for('quote_confirm', quote_id=q.id) }}"
+              onclick="return confirm('Save and book this quote as a confirmed job?{{ ' A new customer will be created.' if q.is_new_customer }}');">Save &amp; book job</button>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+</fieldset>
+</form>
+
+{% if q.id and not locked %}
+<div class="d-flex gap-2 mt-3">
+  {% for st, label, cls in [('sent', 'Mark as sent', 'btn-outline-info'), ('declined', 'Mark as declined', 'btn-outline-danger'), ('draft', 'Back to draft', 'btn-outline-secondary')] if st != q.status %}
+  <form method="post" action="{{ url_for('quote_set_status', quote_id=q.id) }}">
+    <input type="hidden" name="status" value="{{ st }}"><button class="btn btn-sm {{ cls }}" type="submit">{{ label }}</button>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+var ADDRESSES = {{ addresses|tojson }};
+var form = document.getElementById("quoteForm");
+var custSel = document.getElementById("qCustomer");
+function fmt(n) { return "£" + Number(n).toFixed(2); }
+
+// New vs existing customer: show company fields / required marks only for new customers
+function toggleCustomer() {
+  var isNew = !custSel.value;
+  document.querySelectorAll(".new-only").forEach(function(el) { el.classList.toggle("d-none", !isNew); });
+  document.querySelectorAll(".new-req").forEach(function(el) { el.classList.toggle("d-none", !isNew); });
+  var list = ADDRESSES[custSel.value] || [], pick = document.querySelector(".saved-pick"), sel = document.getElementById("savedAddr");
+  pick.classList.toggle("d-none", !list.length);
+  sel.innerHTML = '<option value="">Pick a saved address…</option>' + list.map(function(a, i) {
+    return '<option value="' + i + '">' + a.label + ' – ' + a.postcode + '</option>'; }).join("");
+}
+custSel.addEventListener("change", toggleCustomer);
+document.querySelectorAll(".saved-pick button").forEach(function(btn) {
+  btn.addEventListener("click", function() {
+    var a = (ADDRESSES[custSel.value] || [])[document.getElementById("savedAddr").value];
+    if (!a) return;
+    var t = btn.dataset.target;
+    form.elements[t + "_address"].value = a.address;
+    form.elements[t + "_postcode"].value = a.postcode;
+    if (t === "delivery" && a.contact_name && !form.elements.contact_name.value) form.elements.contact_name.value = a.contact_name;
+    if (t === "delivery" && a.contact_phone && !form.elements.contact_phone.value) form.elements.contact_phone.value = a.contact_phone;
+    refresh();
+  });
+});
+toggleCustomer();
+
+// Live price comparison
+var costTotal = {{ comp.cost_total if comp.cost_total is not none else 'null' }};
+function marginCell(m) {
+  if (!m) return "—";
+  return '<span class="' + (m.profit >= 0 ? "text-success" : "text-danger") + '">' + fmt(m.profit) + " (" + Math.round(m.pct) + "%)</span>";
+}
+function highlight() {
+  var chosen = (form.querySelector('input[name="price_option"]:checked') || {}).value;
+  form.querySelectorAll('input[name="price_option"]').forEach(function(r) {
+    r.closest("tr").classList.toggle("table-warning", r.value === chosen);
+  });
+}
+function updateTarget() {
+  var pct = parseFloat(document.getElementById("targetPct").value);
+  var el = document.getElementById("targetPrice");
+  if (costTotal === null || isNaN(pct) || pct >= 100) { el.textContent = "—"; return; }
+  el.textContent = fmt(costTotal / (1 - pct / 100)) + " ex VAT";
+}
+var timer = null;
+function refresh() { clearTimeout(timer); timer = setTimeout(doRefresh, 350); }
+function doRefresh() {
+  var data = {};
+  new FormData(form).forEach(function(v, k) { data[k] = v; });
+  fetch("{{ url_for('api_quote_compare') }}", {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(data)}).then(function(r) { return r.json(); }).then(function(res) {
+    var chosen = (form.querySelector('input[name="price_option"]:checked') || {}).value || "Standard";
+    var html = "", spot = null, note = "";
+    res.options.forEach(function(o) {
+      if (o.key === "spot") { spot = o; return; }
+      if (!note && o.ok && o.notes && o.notes.length) note = o.notes.join(" ");
+      html += '<tr><td><input class="form-check-input" type="radio" name="price_option" value="' + o.key + '"' +
+              (chosen === o.key ? " checked" : "") + (o.ok ? "" : " disabled") + '></td><td>' + o.label + '</td>' +
+              (o.ok ? '<td class="text-end">' + fmt(o.net) + '</td><td class="text-end text-muted">' + fmt(o.total) +
+                      '</td><td class="text-end">' + marginCell(o.margin) + '</td>'
+                    : '<td colspan="3" class="small text-muted">' + (o.reason || "Can't price yet") + '</td>') + '</tr>';
+    });
+    document.getElementById("optBody").innerHTML = html;
+    document.getElementById("spotMargin").innerHTML = spot ? marginCell(spot.margin) : "—";
+    document.getElementById("bandNote").textContent = note;
+    costTotal = res.cost_total;
+    document.getElementById("costTotal").textContent = costTotal === null ? "—" : fmt(costTotal);
+    document.getElementById("milesNote").textContent = res.miles_note || "";
+    var miles = document.getElementById("estMiles");
+    if (document.activeElement !== miles && res.miles !== null && !miles.dataset.typed) miles.value = res.miles;
+    highlight(); updateTarget();
+  });
+}
+document.getElementById("estMiles").addEventListener("input", function() { this.dataset.typed = "1"; });
+form.querySelectorAll(".live").forEach(function(el) { el.addEventListener("input", refresh); el.addEventListener("change", refresh); });
+form.addEventListener("change", function(e) { if (e.target.name === "price_option") highlight(); });
+document.getElementById("spotNet").addEventListener("input", function() {
+  if (this.value) { form.querySelector('input[name="price_option"][value="spot"]').checked = true; highlight(); }
+});
+document.getElementById("targetPct").addEventListener("input", updateTarget);
+document.getElementById("useTarget").addEventListener("click", function() {
+  var pct = parseFloat(document.getElementById("targetPct").value);
+  if (costTotal === null || isNaN(pct) || pct >= 100) return;
+  document.getElementById("spotNet").value = (costTotal / (1 - pct / 100)).toFixed(2);
+  form.querySelector('input[name="price_option"][value="spot"]').checked = true;
+  refresh();
+});
+updateTarget(); highlight();
+</script>
+{% endblock %}

@@ -28,7 +28,10 @@
         {% endif %}
         <tr><th>Contact</th><td>{{ order.contact_name }} — {{ order.contact_phone }}</td></tr>
         <tr><th>Quantities</th><td>{{ order.quantity_summary or (order.pallets ~ ' pallet(s), ' ~ order.parcels ~ ' parcel(s)') }} ({{ order.total_weight_kg }} kg)</td></tr>
-        <tr><th>Schedule</th><td>Collect {{ order.collection_date or '—' }} · Deliver {{ order.delivery_date or '—' }} · {{ order.timing }}</td></tr>
+        <tr><th>Schedule</th><td>Collect {{ order.collection_date or '—' }}{% if order.collection_time %} {{ order.collection_time }}{% endif %} · Deliver {{ order.delivery_date or '—' }}{% if order.delivery_time %} {{ order.delivery_time }}{% endif %} · {{ order.timing }}</td></tr>
+        <tr><th>Forklift on site</th><td>Collection: {{ {'yes': 'Yes', 'no': 'No'}.get(order.forklift_collection, 'Not known') }} · Delivery: {{ {'yes': 'Yes', 'no': 'No'}.get(order.forklift_delivery, 'Not known') }}
+          {% if order.forklift_collection == 'no' or order.forklift_delivery == 'no' %}<span class="badge bg-warning text-dark ms-1">Tail-lift needed</span>{% endif %}</td></tr>
+        {% if from_quote %}<tr><th>Booked from quote</th><td><a href="{{ url_for('quote_detail', quote_id=from_quote.id) }}">{{ from_quote.reference }}</a></td></tr>{% endif %}
         <tr><th>Quoted price</th><td>£{{ '%.2f'|format(order.quoted_price or 0) }} inc VAT
           {% if order.price_net %}<span class="text-muted small">(£{{ '%.2f'|format(order.price_net) }} net + £{{ '%.2f'|format(order.price_vat or 0) }} VAT)</span>{% endif %}
           {% if order.price_basis %}<div class="text-muted small">{{ order.price_basis }}</div>{% endif %}

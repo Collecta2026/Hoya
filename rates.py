@@ -134,7 +134,9 @@ def quote_for_order(order, customer, surcharges=None, now=None):
 
     if q.get("ok") and customer and customer.discount_pct:
         factor = 1 - (customer.discount_pct / 100.0)
+        before = q["net"]
         q["net"] = round(q["net"] * factor, 2)
+        q["lines"] = list(q.get("lines") or []) + [("Account discount -%g%%" % customer.discount_pct, round(q["net"] - before, 2), None)]
         q["vat"] = round(q["net"] * pricing.VAT, 2)
         q["total"] = round(q["net"] + q["vat"], 2)
         q["basis"] = q["basis"] + (" (-%.0f%%)" % customer.discount_pct)
@@ -164,5 +166,7 @@ def compare_tiers(job, now=None):
         q = quote_for_order(job, _TierCustomer(tier), now=now)
         out.append({"tier": tier, "ok": bool(q.get("ok")), "net": q.get("net"), "vat": q.get("vat"),
                     "total": q.get("total"), "basis": q.get("basis"), "band": q.get("band"),
-                    "reason": q.get("reason"), "notes": q.get("notes") or []})
+                    "reason": q.get("reason"), "notes": q.get("notes") or [],
+                    "lines": [list(l) for l in (q.get("lines") or [])],
+                    "rate": pricing.base_rate(q.get("lines")) if q.get("ok") else None})
     return out

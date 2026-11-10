@@ -334,3 +334,12 @@ def margin(net, cost):
     profit = net - cost
     return {"revenue": round(net, 2), "cost": round(cost, 2), "profit": round(profit, 2),
             "pct": round(profit / net * 100, 1) if net else None}
+
+
+BASE_LINE_PREFIXES = ("Transport charge", "Band ", "Flat rate")
+
+
+def base_rate(lines):
+    """The rate before surcharges: transport charge (+ any band minimum top-up).
+    Fuel surcharge, same-day, late notice, after-6pm etc. are added on top."""
+    return round(sum(l[1] for l in (lines or []) if str(l[0]).startswith(BASE_LINE_PREFIXES)), 2)

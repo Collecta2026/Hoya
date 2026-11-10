@@ -159,7 +159,8 @@ def tier_comparison(job, mode=None, cost_miles=None, now=None):
     cost_total = cv.get("cost", {}).get("total") if cv.get("cost") else None
     for r in rows:
         r["margin"] = pricing.margin(r["net"], cost_total) if (r["ok"] and cost_total is not None) else None
-    return {"rows": rows, "cost_total": cost_total, "miles": cv.get("miles"), "miles_note": cv.get("note")}
+    cost_lines = [list(l) for l in cv["cost"]["lines"]] if cv.get("cost") else []
+    return {"rows": rows, "cost_total": cost_total, "cost_lines": cost_lines, "miles": cv.get("miles"), "miles_note": cv.get("note")}
 
 
 FORKLIFT = {"yes": "Yes", "no": "No"}
@@ -998,6 +999,15 @@ def register_routes(app):
             flash("Couldn't re-price: " + (q.get("reason") or "unknown reason"), "error")
             return redirect(url_for("order_detail", order_id=order.id))
         old = order.price_net
+        if old is not None and abs(round(q["net"], 2) - old) < 0.005:
+            cu = order.customer
+            if cu and cu.pricing_mode == "custom":
+                why = "%s is on bespoke pricing, so the agreed price stays. To change it, use Edit details." % cu.name
+            else:
+                why = ("The rate card still gives the same price for this job (%s). It only changes if the postcodes, "
+                       "pallets, timing or the customer's tier have changed since it was priced." % q["basis"])
+            flash("Price unchanged at £%.2f net + VAT. %s" % (old, why), "info")
+            return redirect(url_for("order_detail", order_id=order.id))
         order.price_net, order.price_vat = round(q["net"], 2), round(q["vat"], 2)
         order.quoted_price, order.price_basis = round(q["total"], 2), q["basis"]
         log_event(order, order.status, "Re-priced: £%.2f -> £%.2f net (%s)" % (old or 0, order.price_net, q["basis"]))
@@ -1991,7 +2001,7 @@ def register_routes(app):
             net = round(q.spot_net, 2)
             opts.append({"key": "spot", "label": "Spot rate", "ok": True, "net": net,
                          "vat": round(net * pricing.VAT, 2), "total": round(net * (1 + pricing.VAT), 2),
-                         "basis": "Spot rate", "reason": None, "notes": [],
+                         "basis": "Spot rate", "reason": None, "notes": [], "lines": [["Spot rate (agreed price)", net, None]], "rate": net,
                          "margin": pricing.margin(net, comp["cost_total"]) if comp["cost_total"] is not None else None})
         return opts, comp
 
@@ -2225,8 +2235,8 @@ def register_routes(app):
         q = Quote(created_at=None)
         _quote_from_form(q, MultiDict(request.get_json(force=True) or {}))
         opts, comp = _quote_options(q)
-        return jsonify({"options": opts, "cost_total": comp["cost_total"], "miles": comp["miles"],
-                        "miles_note": comp["miles_note"]})
+        return jsonify({"options": opts, "cost_total": comp["cost_total"], "cost_lines": comp["cost_lines"],
+                        "miles": comp["miles"], "miles_note": comp["miles_note"]})
 
     @app.route("/api/quote", methods=["POST"])
     @login_required
@@ -2274,6 +2284,12 @@ def register_routes(app):
             q["compare"]["customer_tier"] = sc.tier if sc.pricing_mode == "pallet" else None
         except Exception as exc:
             q["compare"] = {"rows": [], "error": str(exc)}
+        if q.get("ok"):
+            # the customer's own rate before surcharges (custom/bespoke = their agreed price)
+            rate = pricing.base_rate(q.get("lines"))
+            if rate and sc.discount_pct:
+                rate = round(rate * (1 - sc.discount_pct / 100.0), 2)   # their rate after account discount
+            q["rate"] = rate or round(q["net"], 2)
         return jsonify(q)
 
     @app.route("/invoices")

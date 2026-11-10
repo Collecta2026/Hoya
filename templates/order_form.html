@@ -207,18 +207,18 @@ customerSelect.addEventListener("change", loadSavedAddresses);
 loadSavedAddresses();
 toggleMultidrop();
 
-function fmt(n) { return "£" + Number(n).toFixed(2); }
+function fmt(n) { n = Number(n); return (n < 0 ? "-£" : "£") + Math.abs(n).toFixed(2); }
 function compareBlock(cmp, ownNet) {
   if (!cmp || !cmp.rows || !cmp.rows.some(function(r) { return r.ok; })) return "";
   var h = '<div class="border-top pt-2 mt-2"><h6 class="mb-1">Rate card comparison</h6>' +
-          '<div class="text-muted small mb-1">What this job would cost on each account tier.</div>' +
-          '<table class="table table-sm mb-1"><tr class="small text-muted"><th>Tier</th><th class="text-end">Ex VAT</th><th class="text-end">vs this quote</th><th class="text-end">Margin</th></tr>';
+          '<div class="text-muted small mb-1">Each account tier\'s rate for this job, before fuel surcharge and extras.</div>' +
+          '<table class="table table-sm mb-1"><tr class="small text-muted"><th>Tier</th><th class="text-end">Rate</th><th class="text-end">vs this quote</th><th class="text-end">Margin</th></tr>';
   cmp.rows.forEach(function(r) {
     if (!r.ok) { h += '<tr><td>' + r.tier + '</td><td colspan="3" class="small text-muted">' + (r.reason || "-") + '</td></tr>'; return; }
-    var diff = (ownNet != null) ? r.net - ownNet : null;
+    var diff = (ownNet != null) ? r.rate - ownNet : null;
     var mine = cmp.customer_tier === r.tier;
     h += '<tr' + (mine ? ' class="table-warning"' : '') + '><td>' + r.tier + (mine ? ' <span class="small">(theirs)</span>' : '') + '</td>' +
-         '<td class="text-end">' + fmt(r.net) + '</td>' +
+         '<td class="text-end">' + fmt(r.rate) + '</td>' +
          '<td class="text-end small">' + (diff == null ? '' : (Math.abs(diff) < 0.005 ? 'same' : (diff > 0 ? '+' : '−') + fmt(Math.abs(diff)))) + '</td>' +
          '<td class="text-end small">' + (r.margin ? Math.round(r.margin.pct) + '%' : '—') + '</td></tr>';
   });
@@ -288,7 +288,7 @@ function getQuote() {
     var box = document.getElementById("quoteResult");
     if (!q.ok) { box.innerHTML = '<div class="alert alert-warning small mb-0">' + (q.reason || "Can't price this yet.") + '</div>' + compareBlock(q.compare, null); return; }
     var lines = (q.lines || []).map(function(l) {
-      return '<tr><td>' + l[0] + '</td><td class="text-end">£' + l[1].toFixed(2) + '</td></tr>';
+      return '<tr><td>' + l[0] + '</td><td class="text-end">' + fmt(l[1]) + '</td></tr>';
     }).join("");
     var notes = (q.notes || []).map(function(n) {
       return '<div class="alert alert-warning py-1 px-2 small mb-2">' + n + '</div>';
@@ -298,7 +298,7 @@ function getQuote() {
       '<tr><th>Net</th><td class="text-end">£' + q.net.toFixed(2) + '</td></tr>' +
       '<tr><th>VAT</th><td class="text-end">£' + q.vat.toFixed(2) + '</td></tr>' +
       '<tr><th>Total</th><td class="text-end"><b>£' + q.total.toFixed(2) + '</b></td></tr></table>' +
-      costBlock(q.cost) + compareBlock(q.compare, q.net);
+      costBlock(q.cost) + compareBlock(q.compare, q.rate);
     if (q.cost && q.cost.miles != null) document.getElementById("costMiles").value = q.cost.miles;
     wireCostMiles();
   });

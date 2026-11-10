@@ -120,16 +120,17 @@
   <div class="col-lg-5">
     <div class="card p-3 mb-3">
       <h5 class="mb-1">Price options</h5>
-      <p class="text-muted small mb-2">The Standard rate card is used unless you pick another tier or a spot rate.</p>
+      <p class="text-muted small mb-2">The Standard rate card is used unless you pick another tier or a spot rate.
+        <b>Rate</b> is before fuel surcharge and extras, which are added on top.</p>
       <table class="table table-sm align-middle mb-2" id="optTable">
-        <thead><tr><th></th><th>Option</th><th class="text-end">Ex VAT</th><th class="text-end">Inc VAT</th><th class="text-end">Margin</th></tr></thead>
+        <thead><tr><th></th><th>Option</th><th class="text-end">Rate</th><th class="text-end">Ex VAT <span class="fw-normal">(incl. FSC)</span></th><th class="text-end">Margin</th></tr></thead>
         <tbody id="optBody">
         {% for o in options if o.key != 'spot' %}
           <tr class="{{ 'table-warning' if q.price_option == o.key }}">
             <td><input class="form-check-input" type="radio" name="price_option" value="{{ o.key }}" {{ 'checked' if q.price_option == o.key }} {{ 'disabled' if not o.ok }}></td>
             <td>{{ o.label }}</td>
             {% if o.ok %}
-            <td class="text-end">£{{ '%.2f'|format(o.net) }}</td><td class="text-end text-muted">£{{ '%.2f'|format(o.total) }}</td>
+            <td class="text-end fw-semibold">£{{ '%.2f'|format(o.rate) }}</td><td class="text-end text-muted">£{{ '%.2f'|format(o.net) }}</td>
             <td class="text-end">{% if o.margin %}<span class="{{ 'text-success' if o.margin.profit >= 0 else 'text-danger' }}">£{{ '%.2f'|format(o.margin.profit) }} ({{ '%.0f'|format(o.margin.pct) }}%)</span>{% else %}—{% endif %}</td>
             {% else %}<td colspan="3" class="small text-muted">{{ o.reason or "Can't price yet" }}</td>{% endif %}
           </tr>
@@ -148,6 +149,7 @@
         </tbody>
       </table>
       <div class="small text-muted mb-2" id="bandNote">{% set first = options|first %}{% if first and first.ok %}{{ first.notes|join(' ') }}{% endif %}</div>
+      <div class="border rounded p-2 mb-2 small" id="priceBreak"></div>
       <div class="border rounded p-2 bg-light small">
         <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
           <span>Our cost:</span><b id="costTotal">{{ '£%.2f'|format(comp.cost_total) if comp.cost_total is not none else '—' }}</b>
@@ -156,6 +158,7 @@
           <span>miles</span>
         </div>
         <div class="text-muted" id="milesNote">{{ comp.miles_note or '' }}</div>
+        <table class="table table-sm table-borderless mb-0 mt-1" id="costLines"></table>
         <div class="d-flex align-items-center gap-2 flex-wrap mt-2">
           <span>For a</span>
           <input class="form-control form-control-sm" style="max-width:70px" type="number" min="0" max="95" step="1" id="targetPct" value="30">
@@ -211,7 +214,7 @@
 var ADDRESSES = {{ addresses|tojson }};
 var form = document.getElementById("quoteForm");
 var custSel = document.getElementById("qCustomer");
-function fmt(n) { return "£" + Number(n).toFixed(2); }
+function fmt(n) { n = Number(n); return (n < 0 ? "-£" : "£") + Math.abs(n).toFixed(2); }
 
 // New vs existing customer: show company fields / required marks only for new customers
 function toggleCustomer() {
@@ -240,6 +243,32 @@ toggleCustomer();
 
 // Live price comparison
 var costTotal = {{ comp.cost_total if comp.cost_total is not none else 'null' }};
+var OPTS = {{ options|tojson }}, COSTLINES = {{ (comp.cost_lines or [])|tojson }};
+function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : t; return d.innerHTML; }
+function lineRow(l, cls) {
+  return '<tr class="' + (cls || "") + '"><td class="px-0">' + esc(l[0]) + (l[2] ? '<div class="text-muted">' + esc(l[2]) + "</div>" : "") +
+         '</td><td class="text-end px-0">' + fmt(l[1]) + "</td></tr>";
+}
+function renderBreakdown() {
+  var chosen = (form.querySelector('input[name="price_option"]:checked') || {}).value || "Standard";
+  var o = OPTS.filter(function(x) { return x.key === chosen; })[0];
+  var box = document.getElementById("priceBreak");
+  if (!o || !o.ok) { box.innerHTML = '<span class="text-muted">Price breakdown shows here once the job can be priced.</span>'; }
+  else {
+    var h = '<div class="fw-semibold mb-1">Price breakdown: ' + esc(o.label) + '</div><table class="table table-sm table-borderless mb-0">';
+    (o.lines || []).forEach(function(l) { h += lineRow(l); });
+    h += '<tr class="border-top fw-semibold"><td class="px-0">Net (ex VAT)</td><td class="text-end px-0">' + fmt(o.net) + "</td></tr>" +
+         '<tr><td class="px-0">VAT 20%</td><td class="text-end px-0">' + fmt(o.vat) + "</td></tr>" +
+         '<tr class="fw-semibold"><td class="px-0">Total</td><td class="text-end px-0">' + fmt(o.total) + "</td></tr>";
+    if (o.margin) h += '<tr class="fw-semibold ' + (o.margin.profit >= 0 ? "table-success" : "table-danger") + '"><td class="px-1">Margin after our cost</td><td class="text-end px-1">' +
+         fmt(o.margin.profit) + " (" + Math.round(o.margin.pct) + "%)</td></tr>";
+    box.innerHTML = h + "</table>";
+  }
+  var c = "";
+  COSTLINES.forEach(function(l) { c += lineRow(l); });
+  if (COSTLINES.length) c += '<tr class="border-top fw-semibold"><td class="px-0">Our cost</td><td class="text-end px-0">' + fmt(costTotal) + "</td></tr>";
+  document.getElementById("costLines").innerHTML = c;
+}
 function marginCell(m) {
   if (!m) return "—";
   return '<span class="' + (m.profit >= 0 ? "text-success" : "text-danger") + '">' + fmt(m.profit) + " (" + Math.round(m.pct) + "%)</span>";
@@ -270,24 +299,24 @@ function doRefresh() {
       if (!note && o.ok && o.notes && o.notes.length) note = o.notes.join(" ");
       html += '<tr><td><input class="form-check-input" type="radio" name="price_option" value="' + o.key + '"' +
               (chosen === o.key ? " checked" : "") + (o.ok ? "" : " disabled") + '></td><td>' + o.label + '</td>' +
-              (o.ok ? '<td class="text-end">' + fmt(o.net) + '</td><td class="text-end text-muted">' + fmt(o.total) +
+              (o.ok ? '<td class="text-end fw-semibold">' + fmt(o.rate) + '</td><td class="text-end text-muted">' + fmt(o.net) +
                       '</td><td class="text-end">' + marginCell(o.margin) + '</td>'
                     : '<td colspan="3" class="small text-muted">' + (o.reason || "Can't price yet") + '</td>') + '</tr>';
     });
     document.getElementById("optBody").innerHTML = html;
     document.getElementById("spotMargin").innerHTML = spot ? marginCell(spot.margin) : "—";
     document.getElementById("bandNote").textContent = note;
-    costTotal = res.cost_total;
+    costTotal = res.cost_total; OPTS = res.options; COSTLINES = res.cost_lines || [];
     document.getElementById("costTotal").textContent = costTotal === null ? "—" : fmt(costTotal);
     document.getElementById("milesNote").textContent = res.miles_note || "";
     var miles = document.getElementById("estMiles");
     if (document.activeElement !== miles && res.miles !== null && !miles.dataset.typed) miles.value = res.miles;
-    highlight(); updateTarget();
+    highlight(); updateTarget(); renderBreakdown();
   });
 }
 document.getElementById("estMiles").addEventListener("input", function() { this.dataset.typed = "1"; });
 form.querySelectorAll(".live").forEach(function(el) { el.addEventListener("input", refresh); el.addEventListener("change", refresh); });
-form.addEventListener("change", function(e) { if (e.target.name === "price_option") highlight(); });
+form.addEventListener("change", function(e) { if (e.target.name === "price_option") { highlight(); renderBreakdown(); } });
 document.getElementById("spotNet").addEventListener("input", function() {
   if (this.value) { form.querySelector('input[name="price_option"][value="spot"]').checked = true; highlight(); }
 });
@@ -299,6 +328,6 @@ document.getElementById("useTarget").addEventListener("click", function() {
   form.querySelector('input[name="price_option"][value="spot"]').checked = true;
   refresh();
 });
-updateTarget(); highlight();
+updateTarget(); highlight(); renderBreakdown();
 </script>
 {% endblock %}
